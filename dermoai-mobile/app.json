@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "dermoai-mobile",
-    "slug": "dermoai-mobile",
+    "slug": "dermo-ai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -19,7 +19,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.merveaiseoglusteam.dermoai"
     },
     "web": {
       "output": "static",
@@ -43,6 +44,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6cf012d6-452f-40f0-9ac9-f3fd98646d94"
+      }
+    },
+    "owner": "merveaiseoglus-team"
   }
 }

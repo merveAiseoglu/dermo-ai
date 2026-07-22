@@ -1,5 +1,6 @@
 #models.py
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, ARRAY, DateTime
+from sqlalchemy.sql import func
 from database import Base
 # icerikler tablosunun Python/SQLAlchemy karşılığı (ORM Modeli)
 
@@ -17,6 +18,7 @@ class Urun(Base):
     urun_id = Column(Integer, primary_key=True)
     marka = Column(String(50), nullable=False)
     urun_adi = Column(String(100), nullable=False)
+    gorsel_url = Column(String, nullable=True)
 
 class UrunIcerik(Base):
     __tablename__ = "urun_icerikleri"
@@ -37,7 +39,27 @@ class Kullanici(Base):
     isim = Column(String(50), nullable=False)
     yas = Column(Integer)
     cinsiyet = Column(String(20))
-    cilt_tipi = Column(String(50))  # Örn: Kuru, Yağlı, Karma, Hassas
-    temel_sorun = Column(String(100))  # Örn: Akne, Leke, Kırışıklık
+    cilt_tipi = Column(String(50))
+    cihaz_id = Column(String(100), unique=True)
+    cilt_sorunlari = Column(ARRAY(String))
+    onboarding_tamamlandi = Column(Boolean, default=False)
 
 
+class AnalizGecmisi(Base):
+    __tablename__ = "analiz_gecmisi"
+    analiz_id = Column(Integer, primary_key=True)
+    kullanici_id = Column(Integer, ForeignKey("kullanicilar.kullanici_id"))
+    urun_idler = Column(ARRAY(Integer))
+    cakisma_sayisi = Column(Integer)
+    olusturma_tarihi = Column(DateTime, server_default=func.now())
+
+
+class Rutin(Base):
+    __tablename__ = "rutinler"
+    rutin_id         = Column(Integer, primary_key=True)
+    kullanici_id     = Column(Integer, ForeignKey("kullanicilar.kullanici_id"))
+    icerik_id        = Column(Integer, ForeignKey("icerikler.icerik_id"))
+    gunler           = Column(ARRAY(String))
+    zaman_dilimi     = Column(String(20))
+    aktif            = Column(Boolean, default=True)
+    olusturma_tarihi = Column(DateTime, server_default=func.now())
