@@ -276,6 +276,38 @@ def urunleri_getir(db: Session = Depends(get_db)):
     urunler = db.query(Urun).all()
     return urunler
 
+@app.get("/icerikler/{icerik_id}")
+def icerik_detay_getir(icerik_id: int, db: Session = Depends(get_db)):
+    icerik = db.query(Icerik).filter(Icerik.icerik_id == icerik_id).first()
+    if not icerik:
+        raise HTTPException(status_code=404, detail="İçerik bulunamadı")
+    
+    cakismalar = db.query(Cakisma).filter(
+        (Cakisma.icerik_id_1 == icerik_id) | (Cakisma.icerik_id_2 == icerik_id)
+    ).all()
+    
+    cakistigi_icerikler = []
+    for c in cakismalar:
+        karsi_id = c.icerik_id_2 if c.icerik_id_1 == icerik_id else c.icerik_id_1
+        karsi_icerik = db.query(Icerik).filter(Icerik.icerik_id == karsi_id).first()
+        
+        cakistigi_icerikler.append({
+            "icerik_adi": karsi_icerik.icerik_adi if karsi_icerik else f"İçerik #{karsi_id}",
+            "aciklama": c.aciklama,
+            "kaynak": c.kaynak,
+            "kaynak_url": c.kaynak_url
+        })
+        
+    return {
+        "icerik_id": icerik.icerik_id,
+        "icerik_adi": icerik.icerik_adi,
+        "baz_tipi": icerik.baz_tipi,
+        "hamilelikte_guvenli_mi": icerik.hamilelikte_guvenli_mi,
+        "kaynak": icerik.kaynak,
+        "kaynak_url": icerik.kaynak_url,
+        "cakistigi_icerikler": cakistigi_icerikler
+    }
+
 # ─── Kullanıcı Endpoint'leri ──────────────────────────────────────────────────
 
 @app.post("/kullanici")
@@ -417,8 +449,9 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
     tekil_icerik_idler = set(icerik_idler)
     kombinasyonlar = list(combinations(tekil_icerik_idler, 2))
 
-    # icerik_id → icerik_adi eşlemesi (hem çakışma hem tekli öneri için)
+    # icerik_id → icerik kaydı eşlemesi (hem çakışma hem tekli öneri için)
     icerik_kayitlari = db.query(Icerik).filter(Icerik.icerik_id.in_(tekil_icerik_idler)).all()
+    icerik_map = {i.icerik_id: i for i in icerik_kayitlari}
     icerik_adi_map = {i.icerik_id: i.icerik_adi for i in icerik_kayitlari}
 
     # ─ Çakışma analizi ─
@@ -452,6 +485,8 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
                 "aciklama": cakisma.aciklama,
                 "oneri": ai_sonuc["oneri"],
                 "program": ai_sonuc["program"],
+                "kaynak": cakisma.kaynak,
+                "kaynak_url": cakisma.kaynak_url,
             })
 
     # ─ Tekli öneriler (sadece cilt_sorunlari varsa) ─
@@ -466,11 +501,14 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
                 cilt_sorunlari=cilt_sorunlari,
             )
             if sonuc:
+                icerik_obj = icerik_map.get(icerik_id)
                 tekli_oneriler.append({
                     "icerik_id": icerik_id,
                     "icerik_adi": icerik_adi,
                     "oneri": sonuc["oneri"],
                     "program": sonuc["program"],
+                    "kaynak": icerik_obj.kaynak if icerik_obj else None,
+                    "kaynak_url": icerik_obj.kaynak_url if icerik_obj else None,
                 })
 
     # ─ Geçmişe kaydet (kullanici_id varsa) ─

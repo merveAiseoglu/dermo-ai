@@ -22,7 +22,7 @@ import {
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
 
 // Cilt tipine göre statik ipucu haritası
@@ -72,7 +72,7 @@ interface KullaniciBilgisi {
 }
 
 export default function HomeScreen() {
-  const theme = useColorScheme() ?? "light";
+  const { activeTheme: theme, toggleTheme } = useThemeContext();
   const renkler = Colors[theme];
   const router = useRouter();
 
@@ -106,18 +106,27 @@ export default function HomeScreen() {
         <ThemedView style={styles.container}>
           {/* ── Karşılama ── */}
           <View style={styles.baslikAlani}>
-            <ThemedText type="title" style={styles.baslik}>
-              Dermo-AI
-            </ThemedText>
-            {kullanici ? (
-              <ThemedText style={[styles.altBaslik, { color: renkler.tint }]}>
-                Merhaba, {kullanici.isim} 👋
+            <View>
+              <ThemedText type="title" style={styles.baslik}>
+                Dermo-AI
               </ThemedText>
-            ) : (
-              <ThemedText style={[styles.altBaslik, { color: renkler.icon }]}>
-                Kişisel cilt bakım asistanın
-              </ThemedText>
-            )}
+              {kullanici ? (
+                <ThemedText style={[styles.altBaslik, { color: renkler.tint }]}>
+                  Merhaba, {kullanici.isim} 👋
+                </ThemedText>
+              ) : (
+                <ThemedText style={[styles.altBaslik, { color: renkler.icon }]}>
+                  Kişisel cilt bakım asistanın
+                </ThemedText>
+              )}
+            </View>
+            <TouchableOpacity onPress={toggleTheme} style={styles.temaGecisButonu}>
+              <Ionicons
+                name={theme === 'light' ? 'moon' : 'sunny'}
+                size={24}
+                color={renkler.icon}
+              />
+            </TouchableOpacity>
           </View>
 
           {/* ── İpucu Kartı ── */}
@@ -181,6 +190,21 @@ export default function HomeScreen() {
               </ThemedText>
               <Ionicons name="chevron-forward" size={16} color={renkler.icon} />
             </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push("/kutuphane")}
+              activeOpacity={0.8}
+              style={[
+                styles.kucukButon,
+                { backgroundColor: renkler.surface, borderColor: renkler.border },
+              ]}
+            >
+              <Ionicons name="library-outline" size={20} color={renkler.tint} />
+              <ThemedText style={[styles.kucukButonYazi, { color: renkler.text }]}>
+                İçerik Kütüphanesi
+              </ThemedText>
+              <Ionicons name="chevron-forward" size={16} color={renkler.icon} />
+            </TouchableOpacity>
           </View>
 
           {/* ── Uyarı Notu ── */}
@@ -205,7 +229,17 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   scrollContent: { flexGrow: 1 },
   container: { flex: 1, paddingHorizontal: 20, paddingBottom: 40 },
-  baslikAlani: { paddingTop: 12, paddingBottom: 24 },
+  baslikAlani: { 
+    paddingTop: 12, 
+    paddingBottom: 24,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start'
+  },
+  temaGecisButonu: {
+    padding: 8,
+    borderRadius: 20,
+  },
   baslik: { fontSize: 28 },
   altBaslik: { fontSize: 15, marginTop: 4 },
 

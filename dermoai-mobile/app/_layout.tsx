@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { AppThemeProvider, useThemeContext } from '@/hooks/ThemeProvider';
 import { useKullanici } from '@/hooks/use-kullanici';
 
 export const unstable_settings = {
@@ -17,25 +17,24 @@ export const unstable_settings = {
  */
 function RootNavigator() {
   const { yukleniyor } = useKullanici();
-  // useKullanici kendi içinde yönlendirmeyi (router.replace) hallediyor.
-  // Burada sadece hook'u çağırmak yeterli; yukleniyor state'ini
-  // ileride bir splash/loading overlay için kullanabilirsin.
+  const { activeTheme } = useThemeContext();
+  
   return (
-    <Stack>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-    </Stack>
+    <ThemeProvider value={activeTheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <Stack>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+      </Stack>
+      <StatusBar style="auto" />
+    </ThemeProvider>
   );
 }
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <AppThemeProvider>
       <RootNavigator />
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    </AppThemeProvider>
   );
 }

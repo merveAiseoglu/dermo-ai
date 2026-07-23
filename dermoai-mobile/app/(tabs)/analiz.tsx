@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -23,6 +24,7 @@ import {
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { UrunGorseli } from "@/components/urun-gorseli";
+import { KaynakRozeti } from "@/components/kaynak-rozeti";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { API_URL } from "@/hooks/use-kullanici";
@@ -58,6 +60,8 @@ interface Cakisma {
   aciklama: string;
   oneri: string;
   program: CakismaProgram | null;
+  kaynak?: string;
+  kaynak_url?: string;
 }
 
 interface TekliOneriProgram {
@@ -70,6 +74,8 @@ interface TekliOneri {
   icerik_adi: string;
   oneri: string;
   program: TekliOneriProgram | null;
+  kaynak?: string;
+  kaynak_url?: string;
 }
 
 interface AnalizSonucu {
@@ -336,10 +342,13 @@ export default function AnalizScreen() {
                 >
                   {eklendi ? "✅ Rutinde" : "📅 Rutine Ekle"}
                 </ThemedText>
-              </>
+                </>
             )}
           </TouchableOpacity>
         )}
+
+        {/* Kaynak Rozeti */}
+        <KaynakRozeti kaynak={item.kaynak} kaynak_url={item.kaynak_url} />
       </View>
     );
   };
@@ -416,6 +425,9 @@ export default function AnalizScreen() {
             )}
           </TouchableOpacity>
         )}
+
+        {/* Kaynak Rozeti */}
+        <KaynakRozeti kaynak={item.kaynak} kaynak_url={item.kaynak_url} />
       </View>
     );
   };

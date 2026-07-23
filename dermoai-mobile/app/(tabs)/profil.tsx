@@ -26,7 +26,7 @@ import {
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
 import { bildirimIptalEt } from "@/hooks/use-notifications";
 
@@ -59,7 +59,7 @@ interface RutinKaydi {
 }
 
 export default function ProfilScreen() {
-  const theme = useColorScheme() ?? "light";
+  const { activeTheme: theme, themeMode, setThemeMode } = useThemeContext();
   const renkler = Colors[theme];
   const router = useRouter();
 
@@ -514,6 +514,56 @@ export default function ProfilScreen() {
                     </TouchableOpacity>
                   </View>
                 ))}
+            </View>
+          )}
+
+          {/* ── Tema Ayarları Bölümü ── */}
+          {!duzenlemeAktif && (
+            <View style={styles.rutinimBolum}>
+              <View style={styles.rutinimBaslikSatir}>
+                <Ionicons name="color-palette" size={16} color={renkler.tint} />
+                <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
+                  Uygulama Teması
+                </ThemedText>
+              </View>
+              
+              <View style={styles.secenekListesi}>
+                {(['light', 'dark', 'system'] as const).map((mode) => {
+                  const secili = themeMode === mode;
+                  const isimMap = {
+                    light: 'Açık',
+                    dark: 'Koyu',
+                    system: 'Sistem',
+                  };
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      onPress={() => setThemeMode(mode)}
+                      style={[
+                        styles.secenekKutusu,
+                        {
+                          backgroundColor: secili
+                            ? renkler.primaryLight
+                            : renkler.surface,
+                          borderColor: secili
+                            ? renkler.tint
+                            : renkler.border,
+                        },
+                      ]}
+                    >
+                      <ThemedText
+                        style={{
+                          fontSize: 13,
+                          fontWeight: "500",
+                          color: secili ? renkler.tint : renkler.text,
+                        }}
+                      >
+                        {isimMap[mode]}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           )}
 
