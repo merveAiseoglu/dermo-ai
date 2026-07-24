@@ -64,6 +64,28 @@ interface Cakisma {
   kaynak_url?: string;
 }
 
+interface SinerjiProgram {
+  strateji: string;
+  icerik_1_id: number;
+  icerik_1_gunler: string[];
+  icerik_1_zaman: string;
+  icerik_2_id: number;
+  icerik_2_gunler: string[];
+  icerik_2_zaman: string;
+}
+
+interface Sinerji {
+  icerik_1_id: number;
+  icerik_2_id: number;
+  icerik_1_adi?: string;
+  icerik_2_adi?: string;
+  aciklama: string;
+  oneri: string;
+  program: SinerjiProgram | null;
+  kaynak?: string;
+  kaynak_url?: string;
+}
+
 interface TekliOneriProgram {
   gunler: string[];
   zaman_dilimi: string;
@@ -82,6 +104,7 @@ interface AnalizSonucu {
   analiz_edilen_icerik_sayisi: number;
   bulunan_cakisma_sayisi: number;
   cakismalar: Cakisma[];
+  sinerjiler?: Sinerji[];
   tekli_oneriler: TekliOneri[];
   uyari: string;
   hata?: boolean;
@@ -228,6 +251,75 @@ export default function AnalizScreen() {
     }
   };
 
+  // ─── Sinerji için Rutine Ekle ─────────────────────────────────────────────
+
+  const sinerjiRutineEkle = async (sinerji: Sinerji) => {
+    if (!kullaniciId) {
+      Alert.alert("Giriş gerekli", "Rutine eklemek için lütfen önce onboarding'i tamamla.");
+      return;
+    }
+    if (!sinerji.program) {
+      Alert.alert("Program yok", "Bu sinerji için program oluşturulamadı.");
+      return;
+    }
+
+    const anahtar = `sinerji_${sinerji.icerik_1_id}_${sinerji.icerik_2_id}`;
+    setRutineEkleniyor(anahtar);
+
+    try {
+      const { program } = sinerji;
+
+      // İçerik 1 → POST /rutin
+      const yanit1 = await fetch(`${API_URL}/rutin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kullanici_id: kullaniciId,
+          icerik_id: program.icerik_1_id,
+          gunler: program.icerik_1_gunler,
+          zaman_dilimi: program.icerik_1_zaman,
+        }),
+      });
+      if (!yanit1.ok) throw new Error("Rutin 1 kaydedilemedi");
+      const rutin1 = await yanit1.json();
+
+      // İçerik 2 → POST /rutin
+      const yanit2 = await fetch(`${API_URL}/rutin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kullanici_id: kullaniciId,
+          icerik_id: program.icerik_2_id,
+          gunler: program.icerik_2_gunler,
+          zaman_dilimi: program.icerik_2_zaman,
+        }),
+      });
+      if (!yanit2.ok) throw new Error("Rutin 2 kaydedilemedi");
+      const rutin2 = await yanit2.json();
+
+      // Bildirimleri kur
+      await bildirimKur(
+        rutin1.rutin_id,
+        sinerji.icerik_1_adi || `İçerik #${program.icerik_1_id}`,
+        program.icerik_1_gunler,
+        program.icerik_1_zaman
+      );
+      await bildirimKur(
+        rutin2.rutin_id,
+        sinerji.icerik_2_adi || `İçerik #${program.icerik_2_id}`,
+        program.icerik_2_gunler,
+        program.icerik_2_zaman
+      );
+
+      setRutineEklendi((prev) => new Set([...prev, anahtar]));
+    } catch (e) {
+      Alert.alert("Hata", "Rutine eklenirken bir sorun oluştu.");
+      console.error(e);
+    } finally {
+      setRutineEkleniyor(null);
+    }
+  };
+
   // ─── Tekli Öneri için Rutine Ekle ────────────────────────────────────────
 
   const tekliRutineEkle = async (oneri: TekliOneri) => {
@@ -353,6 +445,86 @@ export default function AnalizScreen() {
     );
   };
 
+  // ─── Render: Sinerji Kartı ────────────────────────────────────────────────
+
+  const renderSinerjiKarti = (item: Sinerji, index: number) => {
+    const anahtar = `sinerji_${item.icerik_1_id}_${item.icerik_2_id}`;
+    const eklendi = rutineEklendi.has(anahtar);
+    const yukleniyor_bu = rutineEkleniyor === anahtar;
+
+    return (
+      <View
+        key={`sinerji_${index}`}
+        style={[styles.sonucKart, { backgroundColor: renkler.successLight }]}
+      >
+        {/* Sinerji başlığı */}
+        <View style={styles.sonucBasligi}>
+          <Ionicons name="sparkles" size={18} color={renkler.success} />
+          <ThemedText
+            style={[styles.sonucMetni, { color: renkler.success, fontWeight: "600" }]}
+          >
+            {item.icerik_1_adi && item.icerik_2_adi 
+              ? `${item.icerik_1_adi} + ${item.icerik_2_adi} birlikte iyi çalışır`
+              : "Bu ikisi birlikte iyi çalışır"}
+          </ThemedText>
+        </View>
+
+        {/* AI önerisi */}
+        <ThemedText style={[styles.oneriMetni, { color: renkler.text }]}>
+          {item.oneri}
+        </ThemedText>
+
+        {/* Program özeti */}
+        {item.program && (
+          <View
+            style={[styles.programOzet, { backgroundColor: renkler.surface }]}
+          >
+            <Ionicons name="calendar-outline" size={13} color={renkler.tint} />
+            <ThemedText style={[styles.programMetin, { color: renkler.icon }]}>
+              Birlikte Kullanım: {item.program.icerik_1_gunler.join(", ")} ({item.program.icerik_1_zaman})
+            </ThemedText>
+          </View>
+        )}
+
+        {/* Rutine Ekle butonu */}
+        {item.program && (
+          <TouchableOpacity
+            onPress={() => sinerjiRutineEkle(item)}
+            disabled={eklendi || yukleniyor_bu}
+            activeOpacity={0.8}
+            style={[
+              styles.rutinButon,
+              {
+                backgroundColor: eklendi
+                  ? renkler.successLight
+                  : renkler.primaryLight,
+                borderColor: eklendi ? renkler.success : renkler.tint,
+              },
+            ]}
+          >
+            {yukleniyor_bu ? (
+              <ActivityIndicator size="small" color={renkler.tint} />
+            ) : (
+              <>
+                <ThemedText
+                  style={[
+                    styles.rutinButonYazi,
+                    { color: eklendi ? renkler.success : renkler.tint },
+                  ]}
+                >
+                  {eklendi ? "✅ Rutinde" : "📅 Rutine Ekle"}
+                </ThemedText>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {/* Kaynak Rozeti */}
+        <KaynakRozeti kaynak={item.kaynak} kaynak_url={item.kaynak_url} />
+      </View>
+    );
+  };
+
   // ─── Render: Tekli Öneri Kartı ────────────────────────────────────────────
 
   const renderTekliOneriKarti = (item: TekliOneri, index: number) => {
@@ -437,6 +609,7 @@ export default function AnalizScreen() {
   const sonucVar =
     analizSonucu && !analizSonucu.hata;
   const cakismalar = analizSonucu?.cakismalar ?? [];
+  const sinerjiler = analizSonucu?.sinerjiler ?? [];
   const tekliOneriler = analizSonucu?.tekli_oneriler ?? [];
   const temiz = sonucVar && cakismalar.length === 0;
 
@@ -577,6 +750,19 @@ export default function AnalizScreen() {
 
               {/* Çakışma kartları */}
               {cakismalar.map((item, i) => renderCakismaKarti(item, i))}
+
+              {/* Sinerji başlığı */}
+              {sinerjiler.length > 0 && (
+                <View style={[styles.bolumBaslik, { marginTop: 8 }]}>
+                  <Ionicons name="sparkles" size={16} color={renkler.success} />
+                  <ThemedText style={[styles.bolumBaslikYazi, { color: renkler.success }]}>
+                    ✨ Bu ikisi birlikte iyi çalışır ({sinerjiler.length})
+                  </ThemedText>
+                </View>
+              )}
+
+              {/* Sinerji kartları */}
+              {sinerjiler.map((item, i) => renderSinerjiKarti(item, i))}
 
               {/* Tekli öneriler başlığı */}
               {tekliOneriler.length > 0 && (

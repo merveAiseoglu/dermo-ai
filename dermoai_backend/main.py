@@ -4,12 +4,13 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 from database import SessionLocal
-from models import Icerik, UrunIcerik, Cakisma, Urun, Kullanici, AnalizGecmisi, Rutin
+from models import Icerik, UrunIcerik, Cakisma, Urun, Kullanici, AnalizGecmisi, Rutin, Sinerji, RutinKaydi
 from itertools import combinations
 from dotenv import load_dotenv
 from openai import OpenAI
 import os
 import json
+from datetime import datetime, timedelta
 
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
@@ -52,6 +53,10 @@ class RutinOlustur(BaseModel):
     icerik_id: int
     gunler: list[str]
     zaman_dilimi: str
+
+class RutinKayitIstek(BaseModel):
+    rutin_id: int
+    tarih: str # "YYYY-MM-DD" formatında frontend'den bekleniyor
 
 # ─── DB Bağımlılığı ───────────────────────────────────────────────────────────
 
@@ -190,6 +195,108 @@ KURALLAR — ONERİ (oneri alanı):
     except Exception as e:
         print(f"ai_cakisma_analiz_et hata: {e}")
         return {"oneri": "Bu iki içeriği farklı rutinlerde kullanmanızı öneririz.", "program": None}
+
+
+def ai_sinerji_analiz_et(
+    aciklama: str,
+    icerik_1_id: int,
+    icerik_2_id: int,
+    cilt_tipi: str = None,
+    cilt_sorunlari: list = None,
+) -> dict:
+    """
+    Sinerji (birlikte iyi çalışma) durumunda OpenAI çağrısı.
+    """
+    client = OpenAI(api_key=api_key)
+
+    kisisel_satirlar = []
+    if cilt_tipi:
+        kisisel_satirlar.append(f"Cilt tipi: {cilt_tipi}.")
+    if cilt_sorunlari:
+        sorunlar_str = ", ".join(cilt_sorunlari)
+        kisisel_satirlar.append(
+            f"Cilt sorunları: {sorunlar_str}. "
+            "Bunlar arasında nasıl bir fayda sağlayacağını belirt."
+        )
+
+    kisisel_context = (
+        "\n\nKullanıcıya özel bilgiler:\n" + "\n".join(f"- {s}" for s in kisisel_satirlar)
+        if kisisel_satirlar else ""
+    )
+
+    prompt = f"""Sen uzman bir kozmetik kimyageri ve cilt bakım formülatörüsünsün.
+
+Sinerji mekanizması kaydı (AYNEN baz al, kendi çıkarımını yapma):
+"{aciklama}"{kisisel_context}
+
+GEÇERLİ GÜNLER (SADECE bunlardan seç): {GECERLI_GUNLER}
+GEÇERLİ ZAMAN DİLİMLERİ (SADECE bunlardan seç): {GECERLI_ZAMANLAR}
+
+Aşağıdaki JSON formatında yanıt ver. Başka hiçbir şey yazma, sadece JSON:
+
+{{
+  "oneri": "<3-4 cümle Türkçe samimi ve pratik kullanım önerisi>",
+  "program": {{
+    "strateji": "birlikte_kullanim",
+    "icerik_1_id": {icerik_1_id},
+    "icerik_1_gunler": ["<gün listesi>"],
+    "icerik_1_zaman": "<zaman dilimi>",
+    "icerik_2_id": {icerik_2_id},
+    "icerik_2_gunler": ["<gün listesi>"],
+    "icerik_2_zaman": "<zaman dilimi>"
+  }}
+}}
+
+KURALLAR — PROGRAM (program alanı):
+- Sinerji olduğu için strateji "birlikte_kullanim" olabilir.
+- icerik_1 ve icerik_2 için AYNI günleri ve AYNI zaman dilimini öner (çünkü sinerjiktir ve birlikte kullanılırlar).
+- Günler ve zaman dilimleri SADECE yukarıdaki listelerden.
+
+KURALLAR — ONERİ (oneri alanı):
+- Pratik yönlendirme yap, bu iki içeriği arka arkaya veya karıştırarak kullanmanın faydasını anlat.
+- "Cildinizi gözlemleyerek kullanın" gibi esnek ifadeler kullan.
+- ❗ SAYISAL SIKLIK/HAFTA/DOZ İFADE YASAĞI: "haftada X kez", "X günde bir" gibi hiçbir sayısal ifade oneri metninde GEÇMESİN.
+- Günlere atıfta bulunmak istersen SADECE "belirlenen program günlerinde" şeklinde genel ifade kullan."""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        sonuc = json.loads(response.choices[0].message.content)
+
+        program = sonuc.get("program")
+        if program:
+            gunler_1 = [g for g in program.get("icerik_1_gunler", []) if g in GECERLI_GUNLER]
+            gunler_2 = [g for g in program.get("icerik_2_gunler", []) if g in GECERLI_GUNLER]
+            zaman_1  = program.get("icerik_1_zaman") if program.get("icerik_1_zaman") in GECERLI_ZAMANLAR else GECERLI_ZAMANLAR[2]
+            zaman_2  = program.get("icerik_2_zaman") if program.get("icerik_2_zaman") in GECERLI_ZAMANLAR else GECERLI_ZAMANLAR[2]
+            
+            # Sinerji olduğu için ikisini de senkronize edelim fallback durumunda
+            if not gunler_1 and not gunler_2:
+                ortak_gunler = ["Pazartesi", "Çarşamba", "Cuma"]
+                gunler_1 = gunler_2 = ortak_gunler
+            elif gunler_1 and not gunler_2:
+                gunler_2 = gunler_1
+            elif gunler_2 and not gunler_1:
+                gunler_1 = gunler_2
+
+            program = {
+                "strateji": "birlikte_kullanim",
+                "icerik_1_id": icerik_1_id,
+                "icerik_1_gunler": gunler_1,
+                "icerik_1_zaman": zaman_1,
+                "icerik_2_id": icerik_2_id,
+                "icerik_2_gunler": gunler_2,
+                "icerik_2_zaman": zaman_2,
+            }
+
+        return {"oneri": sonuc.get("oneri", ""), "program": program}
+
+    except Exception as e:
+        print(f"ai_sinerji_analiz_et hata: {e}")
+        return {"oneri": "Bu iki içeriği aynı rutinde güvenle kullanabilirsiniz.", "program": None}
 
 
 def tekli_oneri_al(
@@ -454,8 +561,9 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
     icerik_map = {i.icerik_id: i for i in icerik_kayitlari}
     icerik_adi_map = {i.icerik_id: i.icerik_adi for i in icerik_kayitlari}
 
-    # ─ Çakışma analizi ─
+    # ─ Çakışma ve Sinerji analizi ─
     bulunan_cakismalar = []
+    bulunan_sinerjiler = []
 
     for kombinasyon in kombinasyonlar:
         icerik_1 = min(kombinasyon[0], kombinasyon[1])
@@ -488,6 +596,36 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
                 "kaynak": cakisma.kaynak,
                 "kaynak_url": cakisma.kaynak_url,
             })
+        else:
+            # Çakışma yoksa, sinerji var mı kontrol et
+            sinerji = db.query(Sinerji).filter(
+                Sinerji.icerik_id_1 == icerik_1,
+                Sinerji.icerik_id_2 == icerik_2
+            ).first()
+
+            if sinerji is not None:
+                ai_sonuc = ai_sinerji_analiz_et(
+                    aciklama=sinerji.aciklama,
+                    icerik_1_id=icerik_1,
+                    icerik_2_id=icerik_2,
+                    cilt_tipi=cilt_tipi,
+                    cilt_sorunlari=cilt_sorunlari,
+                )
+                
+                ic1 = icerik_adi_map.get(icerik_1, f"İçerik #{icerik_1}")
+                ic2 = icerik_adi_map.get(icerik_2, f"İçerik #{icerik_2}")
+                
+                bulunan_sinerjiler.append({
+                    "icerik_1_id": icerik_1,
+                    "icerik_2_id": icerik_2,
+                    "icerik_1_adi": ic1,
+                    "icerik_2_adi": ic2,
+                    "aciklama": sinerji.aciklama,
+                    "oneri": ai_sonuc["oneri"],
+                    "program": ai_sonuc["program"],
+                    "kaynak": sinerji.kaynak,
+                    "kaynak_url": sinerji.kaynak_url,
+                })
 
     # ─ Tekli öneriler (sadece cilt_sorunlari varsa) ─
     tekli_oneriler = []
@@ -525,6 +663,7 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
         "analiz_edilen_icerik_sayisi": len(tekil_icerik_idler),
         "bulunan_cakisma_sayisi": len(bulunan_cakismalar),
         "cakismalar": bulunan_cakismalar,
+        "sinerjiler": bulunan_sinerjiler,
         "tekli_oneriler": tekli_oneriler,
         "uyari": "Dermo-AI sonuçları algoritmik analizdir, kapsamlı tıbbi bir veritabanı değildir ve tıbbi tavsiye yerine geçmez.",
     }
@@ -626,3 +765,84 @@ def rutin_sil(rutin_id: int, db: Session = Depends(get_db)):
     rutin.aktif = False
     db.commit()
     return {"mesaj": "Rutin kaldırıldı.", "rutin_id": rutin_id}
+
+
+# ─── Gamification Endpoint'leri ──────────────────────────────────────────────
+
+from sqlalchemy.exc import IntegrityError
+
+@app.post("/rutin-kayit")
+def rutin_kayit_olustur(istek: RutinKayitIstek, db: Session = Depends(get_db)):
+    """Kullanıcının rutini yaptığını kaydeder. Zaten işaretliyse 200 döner."""
+    try:
+        tarih_obj = datetime.strptime(istek.tarih, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Tarih formatı geçersiz, YYYY-MM-DD bekleniyor.")
+
+    yeni_kayit = RutinKaydi(
+        rutin_id=istek.rutin_id,
+        tarih=tarih_obj
+    )
+    
+    try:
+        db.add(yeni_kayit)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return {"mesaj": "Bugün zaten işaretlenmiş."}
+
+    return {"mesaj": "Rutin başarıyla işaretlendi."}
+
+def rozet_hesapla(streak: int) -> dict | None:
+    if streak >= 30: return {"emoji": "🏆", "ad": "30 Gün Ustası"}
+    if streak >= 7: return {"emoji": "⭐", "ad": "7 Gün Kararlı"}
+    if streak >= 3: return {"emoji": "🔥", "ad": "3 Gün Başlangıç"}
+    return None
+
+def sonraki_esik_hesapla(streak: int) -> int:
+    if streak < 3: return 3
+    if streak < 7: return 7
+    if streak < 30: return 30
+    return 30
+
+@app.get("/streak/{kullanici_id}")
+def streak_getir(kullanici_id: int, tarih: str = None, db: Session = Depends(get_db)):
+    """Kullanıcının streak değerini hesaplar."""
+    if tarih:
+        try:
+            bugun = datetime.strptime(tarih, "%Y-%m-%d").date()
+        except ValueError:
+            bugun = datetime.now().date()
+    else:
+        bugun = datetime.now().date()
+        
+    rutinler = db.query(Rutin).filter(Rutin.kullanici_id == kullanici_id, Rutin.aktif == True).all()
+    if not rutinler:
+        return {"streak_gun_sayisi": 0, "son_kayit_tarihi": None, "rozet": None, "sonraki_esik": 3}
+        
+    rutin_idler = [r.rutin_id for r in rutinler]
+    kayit_tarihleri = db.query(RutinKaydi.tarih).filter(RutinKaydi.rutin_id.in_(rutin_idler)).distinct().all()
+    tarih_seti = set(k[0] for k in kayit_tarihleri)
+    
+    if not tarih_seti:
+        return {"streak_gun_sayisi": 0, "son_kayit_tarihi": None, "rozet": None, "sonraki_esik": 3}
+    
+    streak = 0
+    kontrol = bugun
+    if kontrol not in tarih_seti:
+        if (kontrol - timedelta(days=1)) in tarih_seti:
+            kontrol -= timedelta(days=1)
+        else:
+            return {"streak_gun_sayisi": 0, "son_kayit_tarihi": max(tarih_seti).isoformat(), "rozet": None, "sonraki_esik": 3}
+            
+    while kontrol in tarih_seti:
+        streak += 1
+        kontrol -= timedelta(days=1)
+
+    son_kayit_tarihi = max(tarih_seti).isoformat()
+    return {
+        "streak_gun_sayisi": streak, 
+        "son_kayit_tarihi": son_kayit_tarihi,
+        "rozet": rozet_hesapla(streak),
+        "sonraki_esik": sonraki_esik_hesapla(streak)
+    }

@@ -9,8 +9,8 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   SafeAreaView,
   ScrollView,
@@ -66,9 +66,31 @@ const VARSAYILAN_IPUCU = {
   ikon: "shield-checkmark-outline",
 };
 
+function motivasyonSozuGetir(streak: number): string {
+  if (streak === 0) return "Bugün başla, ilk adımı at! 🌱";
+  if (streak < 3) return "Güzel gidiyorsun, devam et!";
+  if (streak < 7) return "3 günlük rozeti kaptın, sıradaki hedef 7 gün! 🔥";
+  if (streak < 30) return "Harikasın, cildin bu tutarlılığı hissediyor 💚";
+  return "Sen bir Dermo-AI ustasısın! 🏆";
+}
+
+const ROZETLER = [
+  { esik: 3, emoji: "🔥", ad: "3 gün" },
+  { esik: 7, emoji: "⭐", ad: "7 gün" },
+  { esik: 30, emoji: "🏆", ad: "30 gün" },
+];
+
 interface KullaniciBilgisi {
+  kullanici_id: number;
   isim: string;
   cilt_tipi?: string;
+}
+
+interface StreakSonucu {
+  streak_gun_sayisi: number;
+  son_kayit_tarihi: string | null;
+  rozet: { emoji: string; ad: string } | null;
+  sonraki_esik: number;
 }
 
 export default function HomeScreen() {
@@ -77,24 +99,40 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const [kullanici, setKullanici] = useState<KullaniciBilgisi | null>(null);
+  const [streak, setStreak] = useState<StreakSonucu | null>(null);
 
-  useEffect(() => {
-    const veriCek = async () => {
-      try {
-        const cihazId = await AsyncStorage.getItem("cihaz_id");
-        if (!cihazId) return;
+  useFocusEffect(
+    useCallback(() => {
+      const veriCek = async () => {
+        try {
+          const cihazId = await AsyncStorage.getItem("cihaz_id");
+          if (!cihazId) return;
 
-        const yanit = await fetch(`${API_URL}/kullanici/cihaz/${cihazId}`);
-        if (!yanit.ok) return;
+          const yanit = await fetch(`${API_URL}/kullanici/cihaz/${cihazId}`);
+          if (!yanit.ok) return;
 
-        const veri = await yanit.json();
-        setKullanici({ isim: veri.isim, cilt_tipi: veri.cilt_tipi });
-      } catch (e) {
-        // sessizce geç
-      }
-    };
-    veriCek();
-  }, []);
+          const veri = await yanit.json();
+          setKullanici(veri);
+
+          // Frontend saatine göre tarih oluştur
+          const d = new Date();
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const localTarih = `${yyyy}-${mm}-${dd}`;
+
+          const streakYanit = await fetch(`${API_URL}/streak/${veri.kullanici_id}?tarih=${localTarih}`);
+          if (streakYanit.ok) {
+            const streakData = await streakYanit.json();
+            setStreak(streakData);
+          }
+        } catch (e) {
+          // sessizce geç
+        }
+      };
+      veriCek();
+    }, [])
+  );
 
   const ipucu = kullanici?.cilt_tipi
     ? CILT_IPUCU[kullanici.cilt_tipi] ?? VARSAYILAN_IPUCU
@@ -128,6 +166,80 @@ export default function HomeScreen() {
               />
             </TouchableOpacity>
           </View>
+
+          {/* ── Streak ve Rozet Kartı ── */}
+          {streak && streak.streak_gun_sayisi > 0 && (
+            <View
+              style={[
+                styles.streakKart,
+                { backgroundColor: renkler.surface, borderColor: renkler.border },
+              ]}
+            >
+              <View style={styles.streakUst}>
+                <View style={styles.streakSol}>
+                  <ThemedText style={[styles.streakBaslik, { color: renkler.tint }]}>
+                    Rutin Serisi
+                  </ThemedText>
+                  <ThemedText type="title" style={{ fontSize: 24, marginTop: 4 }}>
+                    🔥 {streak.streak_gun_sayisi} gün
+                  </ThemedText>
+                </View>
+                {streak.rozet && (
+                  <View style={[styles.rozetKutu, { backgroundColor: renkler.primaryLight }]}>
+                    <ThemedText style={{ fontSize: 22 }}>{streak.rozet.emoji}</ThemedText>
+                    <ThemedText style={[styles.rozetAd, { color: renkler.tint }]}>
+                      {streak.rozet.ad}
+                    </ThemedText>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.progressBarBg}>
+                <View 
+                  style={[
+                    styles.progressBarFill, 
+                    { 
+                      backgroundColor: renkler.tint, 
+                      width: `${Math.min((streak.streak_gun_sayisi / streak.sonraki_esik) * 100, 100)}%` 
+                    }
+                  ]} 
+                />
+              </View>
+              <ThemedText style={[styles.progressText, { color: renkler.icon }]}>
+                Sonraki hedefe ({streak.sonraki_esik} gün) {streak.sonraki_esik - streak.streak_gun_sayisi} gün kaldı!
+              </ThemedText>
+
+              {/* ── Rozet Yol Haritası Şeridi ── */}
+              <View style={styles.rozetSeridi}>
+                {ROZETLER.map((r) => {
+                  const kazanildi = streak.streak_gun_sayisi >= r.esik;
+                  const siradaki = streak.sonraki_esik === r.esik;
+                  return (
+                    <View 
+                      key={r.esik} 
+                      style={[
+                        styles.seritRozet,
+                        { opacity: kazanildi ? 1 : 0.3 },
+                        siradaki && { borderBottomWidth: 2, borderBottomColor: renkler.tint, paddingBottom: 2 }
+                      ]}
+                    >
+                      <ThemedText style={{ fontSize: 20 }}>{r.emoji}</ThemedText>
+                      <ThemedText style={{ fontSize: 10, fontWeight: '600', marginTop: 2, color: renkler.text }}>
+                        {r.ad}
+                      </ThemedText>
+                    </View>
+                  );
+                })}
+              </View>
+
+              {/* ── Motivasyon Sözü ── */}
+              <View style={[styles.motivasyonKutu, { backgroundColor: renkler.primaryLight }]}>
+                <ThemedText style={[styles.motivasyonYazi, { color: renkler.tint }]}>
+                  {motivasyonSozuGetir(streak.streak_gun_sayisi)}
+                </ThemedText>
+              </View>
+            </View>
+          )}
 
           {/* ── İpucu Kartı ── */}
           <View
@@ -262,6 +374,62 @@ const styles = StyleSheet.create({
   ipucuIcerik: { flex: 1, gap: 6 },
   ipucuBaslik: { fontSize: 14 },
   ipucuMetin: { fontSize: 14, lineHeight: 20 },
+
+  streakKart: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 12,
+  },
+  streakUst: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  streakSol: { flex: 1 },
+  streakBaslik: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
+  rozetKutu: {
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 12,
+    minWidth: 80,
+  },
+  rozetAd: { fontSize: 10, fontWeight: '600', marginTop: 4, textAlign: 'center' },
+  progressBarBg: {
+    height: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressText: { fontSize: 12, marginTop: 4 },
+  rozetSeridi: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  seritRozet: {
+    alignItems: 'center',
+  },
+  motivasyonKutu: {
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  motivasyonYazi: {
+    fontSize: 13,
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
 
   eylemAlani: { gap: 12, marginBottom: 24 },
   eylemBaslik: { fontSize: 13, textTransform: "uppercase", letterSpacing: 0.5 },

@@ -20,6 +20,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -144,4 +146,80 @@ export async function testBildirimiGonder(icerikAdi: string = "Rutin"): Promise<
       repeats: false,
     },
   });
+}
+
+// ─── Hijyen Hatırlatıcıları ──────────────────────────────────────────────────
+
+export async function hijyenBildirimiKur(hijyen: any): Promise<void> {
+  await hijyenBildirimiIptalEt(hijyen.id);
+  
+  const notifIds: string[] = [];
+  
+  if (hijyen.sıklık === "günde 3 kez" && hijyen.saatler) {
+    for (const saat of hijyen.saatler) {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: hijyen.baslik,
+          body: hijyen.mesaj,
+          data: { hijyen_id: hijyen.id },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: saat,
+          minute: 0,
+        },
+      });
+      notifIds.push(id);
+    }
+  } else if (hijyen.sıklık === "haftalık" && hijyen.gun && hijyen.saat !== undefined) {
+    const weekday = GUN_WEEKDAY[hijyen.gun];
+    if (weekday) {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: hijyen.baslik,
+          body: hijyen.mesaj,
+          data: { hijyen_id: hijyen.id },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+          weekday,
+          hour: hijyen.saat,
+          minute: 0,
+        },
+      });
+      notifIds.push(id);
+    }
+  } else if (hijyen.sıklık === "aylık" && hijyen.ayin_gunu && hijyen.saat !== undefined) {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: hijyen.baslik,
+        body: hijyen.mesaj,
+        data: { hijyen_id: hijyen.id },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.MONTHLY,
+        day: hijyen.ayin_gunu,
+        hour: hijyen.saat,
+        minute: 0,
+      },
+    });
+    notifIds.push(id);
+  }
+
+  await AsyncStorage.setItem(`notif_hijyen_${hijyen.id}`, JSON.stringify(notifIds));
+}
+
+export async function hijyenBildirimiIptalEt(hijyenId: string): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(`notif_hijyen_${hijyenId}`);
+    if (!raw) return;
+
+    const ids: string[] = JSON.parse(raw);
+    for (const id of ids) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+    }
+    await AsyncStorage.removeItem(`notif_hijyen_${hijyenId}`);
+  } catch (e) {
+    console.warn(`Hijyen bildirim iptal hatası [${hijyenId}]:`, e);
+  }
 }

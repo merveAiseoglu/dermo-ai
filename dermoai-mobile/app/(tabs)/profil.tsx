@@ -21,6 +21,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
@@ -28,7 +29,41 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
-import { bildirimIptalEt } from "@/hooks/use-notifications";
+import { bildirimIptalEt, hijyenBildirimiKur, hijyenBildirimiIptalEt, izinIste } from "@/hooks/use-notifications";
+
+const HIJYEN_HATIRLATICILARI = [
+  {
+    id: "gunes_kremi",
+    baslik: "☀️ Güneş Kremi Yenileme",
+    mesaj: "Güneş kreminizi tekrar sürmeyi unutmayın",
+    sıklık: "günde 3 kez",
+    saatler: [10, 13, 16],
+  },
+  {
+    id: "yastik_kilifi",
+    baslik: "🛏️ Yastık Kılıfı Değişimi",
+    mesaj: "Cilt sağlığınız için yastık kılıfınızı değiştirmeyi unutmayın",
+    sıklık: "haftalık",
+    gun: "Pazar",
+    saat: 20,
+  },
+  {
+    id: "makyaj_fircasi",
+    baslik: "🖌️ Makyaj Fırçası/Sünger Temizliği",
+    mesaj: "Fırça ve süngerlerinizi temizlemeyi unutmayın",
+    sıklık: "haftalık",
+    gun: "Cumartesi",
+    saat: 19,
+  },
+  {
+    id: "urun_skt",
+    baslik: "📅 Ürün Son Kullanma Tarihi Kontrolü",
+    mesaj: "Açık kutu ürünlerinizin son kullanma tarihlerini kontrol edin",
+    sıklık: "aylık",
+    ayin_gunu: 1,
+    saat: 18,
+  },
+];
 
 const CILT_TIPLERI = ["Normal", "Yağlı", "Kuru", "Karma", "Hassas"];
 
@@ -71,11 +106,14 @@ export default function ProfilScreen() {
   // Rutinim bölümü
   const [rutinler, setRutinler] = useState<RutinKaydi[]>([]);
   const [rutinYukleniyor, setRutinYukleniyor] = useState(false);
+  const [isaretlenenRutinler, setIsaretlenenRutinler] = useState<Set<number>>(new Set());
 
   // Düzenleme alanları
   const [duzenIsim, setDuzenIsim] = useState("");
   const [duzenCiltTipi, setDuzenCiltTipi] = useState<string | null>(null);
   const [duzenCiltSorunlari, setDuzenCiltSorunlari] = useState<string[]>([]);
+  
+  const [hijyenDurumlari, setHijyenDurumlari] = useState<Record<string, boolean>>({});
 
   const veriCek = useCallback(async () => {
     setYukleniyor(true);
@@ -89,8 +127,15 @@ export default function ProfilScreen() {
       const veri: KullaniciBilgisi = await yanit.json();
       setKullanici(veri);
 
-      // Rutin listesini de çek
       rutinleriCek(veri.kullanici_id);
+
+      const yeniDurumlar: Record<string, boolean> = {};
+      for (const hijyen of HIJYEN_HATIRLATICILARI) {
+        const val = await AsyncStorage.getItem(`hijyen_durum_${hijyen.id}`);
+        yeniDurumlar[hijyen.id] = val === "true";
+      }
+      setHijyenDurumlari(yeniDurumlar);
+
     } catch (e) {
       console.error(e);
     } finally {
@@ -109,6 +154,26 @@ export default function ProfilScreen() {
       console.error("Rutin yükleme hatası:", e);
     } finally {
       setRutinYukleniyor(false);
+    }
+  };
+
+  const toggleHijyen = async (hijyen: any) => {
+    const newVal = !hijyenDurumlari[hijyen.id];
+    setHijyenDurumlari(prev => ({ ...prev, [hijyen.id]: newVal }));
+    await AsyncStorage.setItem(`hijyen_durum_${hijyen.id}`, String(newVal));
+
+    if (newVal) {
+      const izinOk = await izinIste();
+      if (izinOk) {
+        await hijyenBildirimiKur(hijyen);
+        Alert.alert("Aktif", `${hijyen.baslik} hatırlatıcısı açıldı.`);
+      } else {
+        setHijyenDurumlari(prev => ({ ...prev, [hijyen.id]: false }));
+        await AsyncStorage.setItem(`hijyen_durum_${hijyen.id}`, "false");
+        Alert.alert("Hata", "Bildirim izni gerekli.");
+      }
+    } else {
+      await hijyenBildirimiIptalEt(hijyen.id);
     }
   };
 
@@ -209,6 +274,53 @@ export default function ProfilScreen() {
         },
       ]
     );
+  };
+
+  const rutinIsaretle = async (rutinId: number) => {
+    try {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const localTarih = `${yyyy}-${mm}-${dd}`;
+
+      let eskiStreak = 0;
+      if (kullanici) {
+        try {
+          const sYanit = await fetch(`${API_URL}/streak/${kullanici.kullanici_id}?tarih=${localTarih}`);
+          if (sYanit.ok) {
+            const data = await sYanit.json();
+            eskiStreak = data.streak_gun_sayisi || 0;
+          }
+        } catch (e) {}
+      }
+
+      const yanit = await fetch(`${API_URL}/rutin-kayit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rutin_id: rutinId, tarih: localTarih }),
+      });
+      
+      if (yanit.ok) {
+        setIsaretlenenRutinler(prev => new Set([...prev, rutinId]));
+        
+        if (kullanici) {
+          try {
+            const sYanit2 = await fetch(`${API_URL}/streak/${kullanici.kullanici_id}?tarih=${localTarih}`);
+            if (sYanit2.ok) {
+              const data2 = await sYanit2.json();
+              const yeniStreak = data2.streak_gun_sayisi || 0;
+              
+              if (yeniStreak > eskiStreak && [3, 7, 30].includes(yeniStreak)) {
+                Alert.alert("🎉 Tebrikler!", `${yeniStreak} Gün Rozetini Kazandın!`);
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    } catch(e) {
+      console.error(e);
+    }
   };
 
   if (yukleniyor) {
@@ -503,17 +615,76 @@ export default function ProfilScreen() {
                         {rutin.gunler.join(", ")} • {rutin.zaman_dilimi}
                       </ThemedText>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => rutinSil(rutin)}
-                      activeOpacity={0.7}
-                      style={[styles.rutinKaldirButon, { borderColor: renkler.danger }]}
-                    >
-                      <ThemedText style={[styles.rutinKaldirYazi, { color: renkler.danger }]}>
-                        Kaldır
-                      </ThemedText>
-                    </TouchableOpacity>
+                    <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                      <TouchableOpacity
+                        onPress={() => rutinIsaretle(rutin.rutin_id)}
+                        disabled={isaretlenenRutinler.has(rutin.rutin_id)}
+                        activeOpacity={0.7}
+                        style={[
+                          styles.rutinKaldirButon, 
+                          { 
+                            borderColor: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.success : renkler.tint,
+                            backgroundColor: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.successLight : 'transparent'
+                          }
+                        ]}
+                      >
+                        <ThemedText 
+                          style={[
+                            styles.rutinKaldirYazi, 
+                            { color: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.success : renkler.tint }
+                          ]}
+                        >
+                          {isaretlenenRutinler.has(rutin.rutin_id) ? "✅ İşaretlendi" : "✓ Bugün Yaptım"}
+                        </ThemedText>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => rutinSil(rutin)}
+                        activeOpacity={0.7}
+                      >
+                        <ThemedText style={[styles.rutinKaldirYazi, { color: renkler.danger, fontWeight: '400', fontSize: 11 }]}>
+                          Sil
+                        </ThemedText>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ))}
+            </View>
+          )}
+
+          {/* ── Cilt Hijyeni Hatırlatıcıları Bölümü ── */}
+          {!duzenlemeAktif && (
+            <View style={styles.rutinimBolum}>
+              <View style={styles.rutinimBaslikSatir}>
+                <Ionicons name="water-outline" size={16} color={renkler.tint} />
+                <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
+                  Cilt Hijyeni Hatırlatıcıları
+                </ThemedText>
+              </View>
+
+              {HIJYEN_HATIRLATICILARI.map((hijyen) => (
+                <View
+                  key={hijyen.id}
+                  style={[
+                    styles.rutinKart,
+                    { backgroundColor: renkler.surface, borderColor: renkler.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+                  ]}
+                >
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <ThemedText type="defaultSemiBold" style={styles.rutinIcerikAdi}>
+                      {hijyen.baslik}
+                    </ThemedText>
+                    <ThemedText style={[styles.rutinDetay, { color: renkler.icon, marginTop: 4, fontSize: 11 }]}>
+                      {hijyen.mesaj} ({hijyen.sıklık})
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={!!hijyenDurumlari[hijyen.id]}
+                    onValueChange={() => toggleHijyen(hijyen)}
+                    trackColor={{ false: "#767577", true: renkler.tint }}
+                    thumbColor={"#f4f3f4"}
+                  />
+                </View>
+              ))}
             </View>
           )}
 

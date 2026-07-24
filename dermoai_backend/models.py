@@ -1,5 +1,5 @@
 #models.py
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, ARRAY, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, ARRAY, DateTime, Text, Date, UniqueConstraint
 from sqlalchemy.sql import func
 from database import Base
 # icerikler tablosunun Python/SQLAlchemy karşılığı (ORM Modeli)
@@ -33,6 +33,14 @@ class Cakisma(Base):
     kaynak = Column(String(200))
     kaynak_url = Column(String)
 
+class Sinerji(Base):
+    __tablename__ = "sinerjiler"
+    icerik_id_1 = Column(Integer, ForeignKey("icerikler.icerik_id"), primary_key=True)
+    icerik_id_2 = Column(Integer, ForeignKey("icerikler.icerik_id"), primary_key=True)
+    aciklama = Column(Text)
+    kaynak = Column(String(255))
+    kaynak_url = Column(String(255))
+
 class Kullanici(Base):
     __tablename__ = "kullanicilar"
     kullanici_id = Column(Integer, primary_key=True)
@@ -63,3 +71,11 @@ class Rutin(Base):
     zaman_dilimi     = Column(String(20))
     aktif            = Column(Boolean, default=True)
     olusturma_tarihi = Column(DateTime, server_default=func.now())
+
+class RutinKaydi(Base):
+    __tablename__ = "rutin_kayitlari"
+    kayit_id = Column(Integer, primary_key=True)
+    rutin_id = Column(Integer, ForeignKey("rutinler.rutin_id"))
+    tarih = Column(Date, server_default=func.current_date())
+    
+    __table_args__ = (UniqueConstraint('rutin_id', 'tarih', name='_rutin_tarih_uc'),)
