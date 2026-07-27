@@ -33,7 +33,9 @@ import {
   bildirimKur,
   izinIste,
   testBildirimiGonder,
-} from "@/hooks/use-notifications";
+import { bildirimIptalEt, bildirimKur, izinIste, testBildirimiGonder } from "@/hooks/use-notifications";
+import { BarkodTarayiciModal } from "@/components/BarkodTarayiciModal";
+import { RenkRozeti } from "@/components/RenkRozeti";
 
 // ─── Tipler ──────────────────────────────────────────────────────────────────
 
@@ -57,6 +59,10 @@ interface CakismaProgram {
 interface Cakisma {
   icerik_1_id: number;
   icerik_2_id: number;
+  icerik_1_adi?: string;
+  icerik_1_renk?: string;
+  icerik_2_adi?: string;
+  icerik_2_renk?: string;
   aciklama: string;
   oneri: string;
   program: CakismaProgram | null;
@@ -78,7 +84,9 @@ interface Sinerji {
   icerik_1_id: number;
   icerik_2_id: number;
   icerik_1_adi?: string;
+  icerik_1_renk?: string;
   icerik_2_adi?: string;
+  icerik_2_renk?: string;
   aciklama: string;
   oneri: string;
   program: SinerjiProgram | null;
@@ -94,6 +102,7 @@ interface TekliOneriProgram {
 interface TekliOneri {
   icerik_id: number;
   icerik_adi: string;
+  renk?: string;
   oneri: string;
   program: TekliOneriProgram | null;
   kaynak?: string;
@@ -127,18 +136,47 @@ export default function AnalizScreen() {
   const [rutineEklendi, setRutineEklendi] = useState<Set<string>>(new Set());
   const [rutineEkleniyor, setRutineEkleniyor] = useState<string | null>(null);
 
+  // Ürün Ekle / Barkod
+  const [barkodModalVisible, setBarkodModalVisible] = useState(false);
+
   // İzin bir kez istensin
   const izinIstendi = useRef(false);
+
+  const urunleriGetir = () => {
+    fetch(`${API_URL}/urunler`)
+      .then((r) => r.json())
+      .then(setUrunler)
+      .catch((e) => console.log("Ürünler yüklenemedi:", e));
+  };
 
   useEffect(() => {
     AsyncStorage.getItem("kullanici_id").then((id) => {
       if (id) setKullaniciId(Number(id));
     });
-    fetch(`${API_URL}/urunler`)
-      .then((r) => r.json())
-      .then(setUrunler)
-      .catch((e) => console.log("Ürünler yüklenemedi:", e));
+    urunleriGetir();
   }, []);
+
+  const handleUrunEkleSecenekleri = () => {
+    Alert.alert(
+      "Ürün Ekle",
+      "Nasıl eklemek istersiniz?",
+      [
+        { text: "📷 Barkod Tara", onPress: () => setBarkodModalVisible(true) },
+        { text: "✍️ Manuel Ekle", onPress: () => Alert.alert("Bilgi", "Bu özellik yakında eklenecek.") },
+        { text: "İptal", style: "cancel" }
+      ]
+    );
+  };
+
+  const handleUrunBulundu = (urunId: number, urunAdi: string, marka: string) => {
+    urunleriGetir();
+    setSeciliUrunler((prev) => {
+      if (!prev.includes(urunId)) {
+        return [...prev, urunId];
+      }
+      return prev;
+    });
+  };
 
   // ─── Analiz ────────────────────────────────────────────────────────────────
 
@@ -160,23 +198,30 @@ export default function AnalizScreen() {
       }).catch((e) => console.log("İzin isteme hatası:", e));
     }
 
+    const payload = {
+      urun_idler: seciliUrunler,
+      ...(kullaniciId ? { kullanici_id: kullaniciId } : {}),
+    };
+    console.log("ANALIZ ISTEGI:", JSON.stringify(payload));
+
     fetch(`${API_URL}/analiz`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        urun_idler: seciliUrunler,
-        ...(kullaniciId ? { kullanici_id: kullaniciId } : {}),
-      }),
+      body: JSON.stringify(payload),
     })
       .then((r) => {
-        if (!r.ok) throw new Error("Sunucu hatası");
+        if (!r.ok) {
+          console.error(`Sunucu yanıtı ok değil. Status: ${r.status}`);
+          throw new Error(`HTTP Hata: ${r.status}`);
+        }
         return r.json();
       })
       .then((data) => {
         setAnalizSonucu(data);
         setYukleniyor(false);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error("ANALIZ HATASI:", error);
         setAnalizSonucu({ hata: true, mesaj: "Sunucu hatası, tekrar deneyin." } as any);
         setYukleniyor(false);
       });
@@ -380,12 +425,34 @@ export default function AnalizScreen() {
         {/* Çakışma başlığı */}
         <View style={styles.sonucBasligi}>
           <Ionicons name="warning" size={18} color={renkler.danger} />
-          <ThemedText
-            style={[styles.sonucMetni, { color: renkler.danger, fontWeight: "600" }]}
-          >
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', flex: 1, gap: 4 }}>
+            {item.icerik_1_adi && item.icerik_2_adi ? (
+              <>
+                <ThemedText style={[styles.sonucMetni, { color: renkler.danger, fontWeight: "600" }]}>
+                  {item.icerik_1_adi}
+                </ThemedText>
+                <RenkRozeti renk={item.icerik_1_renk} />
+                <ThemedText style={[styles.sonucMetni, { color: renkler.danger, fontWeight: "600" }]}>
+                  {" + "}
+                </ThemedText>
+                <ThemedText style={[styles.sonucMetni, { color: renkler.danger, fontWeight: "600" }]}>
+                  {item.icerik_2_adi}
+                </ThemedText>
+                <RenkRozeti renk={item.icerik_2_renk} />
+              </>
+            ) : (
+              <ThemedText style={[styles.sonucMetni, { color: renkler.danger, fontWeight: "600" }]}>
+                {item.aciklama}
+              </ThemedText>
+            )}
+          </View>
+        </View>
+        
+        {item.icerik_1_adi && item.icerik_2_adi && (
+          <ThemedText style={{ color: renkler.danger, fontSize: 13, marginBottom: 6, fontStyle: 'italic' }}>
             {item.aciklama}
           </ThemedText>
-        </View>
+        )}
 
         {/* AI önerisi */}
         <ThemedText style={[styles.oneriMetni, { color: renkler.text }]}>
@@ -460,13 +527,27 @@ export default function AnalizScreen() {
         {/* Sinerji başlığı */}
         <View style={styles.sonucBasligi}>
           <Ionicons name="sparkles" size={18} color={renkler.success} />
-          <ThemedText
-            style={[styles.sonucMetni, { color: renkler.success, fontWeight: "600" }]}
-          >
-            {item.icerik_1_adi && item.icerik_2_adi 
-              ? `${item.icerik_1_adi} + ${item.icerik_2_adi} birlikte iyi çalışır`
-              : "Bu ikisi birlikte iyi çalışır"}
-          </ThemedText>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', flex: 1, gap: 4 }}>
+            {item.icerik_1_adi && item.icerik_2_adi ? (
+              <>
+                <ThemedText style={[styles.sonucMetni, { color: renkler.success, fontWeight: "600" }]}>
+                  {item.icerik_1_adi}
+                </ThemedText>
+                <RenkRozeti renk={item.icerik_1_renk} />
+                <ThemedText style={[styles.sonucMetni, { color: renkler.success, fontWeight: "600" }]}>
+                  {" + "}
+                </ThemedText>
+                <ThemedText style={[styles.sonucMetni, { color: renkler.success, fontWeight: "600" }]}>
+                  {item.icerik_2_adi}
+                </ThemedText>
+                <RenkRozeti renk={item.icerik_2_renk} />
+              </>
+            ) : (
+              <ThemedText style={[styles.sonucMetni, { color: renkler.success, fontWeight: "600" }]}>
+                Bu ikisi birlikte iyi çalışır
+              </ThemedText>
+            )}
+          </View>
         </View>
 
         {/* AI önerisi */}
@@ -543,11 +624,14 @@ export default function AnalizScreen() {
         {/* Başlık */}
         <View style={styles.sonucBasligi}>
           <Ionicons name="sparkles" size={16} color={renkler.tint} />
-          <ThemedText
-            style={[styles.sonucMetni, { color: renkler.tint, fontWeight: "600" }]}
-          >
-            {item.icerik_adi}
-          </ThemedText>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <ThemedText
+              style={[styles.sonucMetni, { color: renkler.tint, fontWeight: "600" }]}
+            >
+              {item.icerik_adi}
+            </ThemedText>
+            <RenkRozeti renk={item.renk} />
+          </View>
         </View>
 
         {/* Öneri */}
@@ -618,14 +702,23 @@ export default function AnalizScreen() {
       <ThemedView style={styles.container}>
         {/* Başlık */}
         <View style={styles.baslikAlani}>
-          <ThemedText type="title" style={styles.baslik}>
-            Analiz
-          </ThemedText>
-          <ThemedText style={[styles.altBaslik, { color: renkler.icon }]}>
-            {seciliUrunler.length > 0
-              ? `${seciliUrunler.length} ürün seçildi`
-              : "Ürünlerini seç, çakışmaları öğren"}
-          </ThemedText>
+          <View style={{ flex: 1 }}>
+            <ThemedText type="title" style={styles.baslik}>
+              Analiz
+            </ThemedText>
+            <ThemedText style={[styles.altBaslik, { color: renkler.icon }]}>
+              {seciliUrunler.length > 0
+                ? `${seciliUrunler.length} ürün seçildi`
+                : "Ürünlerini seç, çakışmaları öğren"}
+            </ThemedText>
+          </View>
+          <TouchableOpacity
+            onPress={handleUrunEkleSecenekleri}
+            style={[styles.urunEkleButon, { backgroundColor: renkler.primaryLight, borderColor: renkler.tint }]}
+          >
+            <Ionicons name="add" size={20} color={renkler.tint} />
+            <ThemedText style={{ color: renkler.tint, fontWeight: '600' }}>Ekle</ThemedText>
+          </TouchableOpacity>
         </View>
 
         {/* TODO: Sunum/teslim öncesi bu test butonunu kaldır */}
@@ -781,6 +874,11 @@ export default function AnalizScreen() {
             </>
           }
         />
+        <BarkodTarayiciModal
+          visible={barkodModalVisible}
+          onClose={() => setBarkodModalVisible(false)}
+          onProductFound={handleUrunBulundu}
+        />
       </ThemedView>
     </SafeAreaView>
   );
@@ -791,9 +889,18 @@ export default function AnalizScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   container: { flex: 1, paddingHorizontal: 20 },
-  baslikAlani: { paddingTop: 12, paddingBottom: 16 },
+  baslikAlani: { paddingTop: 12, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   baslik: { fontSize: 28 },
   altBaslik: { fontSize: 14, marginTop: 4 },
+  urunEkleButon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 4,
+  },
   liste: { paddingBottom: 8 },
   urunKutusu: {
     padding: 16,

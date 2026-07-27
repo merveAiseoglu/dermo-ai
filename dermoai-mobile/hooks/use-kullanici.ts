@@ -12,7 +12,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 
 // Backend base URL — gerekirse .env'den al
-export const API_URL = "http://192.168.1.104:8000";
+export const API_URL = "http://10.226.41.168:8000";
 
 // AsyncStorage anahtarları
 const CIHAZ_ID_KEY = "cihaz_id";

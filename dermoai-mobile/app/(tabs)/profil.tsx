@@ -26,6 +26,7 @@ import {
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { ManuelRutinEkleModal } from "@/components/ManuelRutinEkleModal";
 import { Colors } from "@/constants/theme";
 import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
@@ -81,8 +82,10 @@ const CILT_SORUNLARI = [
 interface KullaniciBilgisi {
   kullanici_id: number;
   isim: string;
+  cihaz_id?: string;
   cilt_tipi?: string;
   cilt_sorunlari?: string[];
+  hamilelik_modu_aktif?: boolean;
 }
 
 interface RutinKaydi {
@@ -107,11 +110,13 @@ export default function ProfilScreen() {
   const [rutinler, setRutinler] = useState<RutinKaydi[]>([]);
   const [rutinYukleniyor, setRutinYukleniyor] = useState(false);
   const [isaretlenenRutinler, setIsaretlenenRutinler] = useState<Set<number>>(new Set());
+  const [manuelModalAcik, setManuelModalAcik] = useState(false);
 
   // Düzenleme alanları
   const [duzenIsim, setDuzenIsim] = useState("");
   const [duzenCiltTipi, setDuzenCiltTipi] = useState<string | null>(null);
   const [duzenCiltSorunlari, setDuzenCiltSorunlari] = useState<string[]>([]);
+  const [duzenHamilelikModu, setDuzenHamilelikModu] = useState(false);
   
   const [hijyenDurumlari, setHijyenDurumlari] = useState<Record<string, boolean>>({});
 
@@ -188,6 +193,7 @@ export default function ProfilScreen() {
     setDuzenIsim(kullanici.isim);
     setDuzenCiltTipi(kullanici.cilt_tipi ?? null);
     setDuzenCiltSorunlari(kullanici.cilt_sorunlari ?? []);
+    setDuzenHamilelikModu(kullanici.hamilelik_modu_aktif ?? false);
     setDuzenlemeAktif(true);
   };
 
@@ -217,6 +223,7 @@ export default function ProfilScreen() {
             isim: duzenIsim.trim(),
             cilt_tipi: duzenCiltTipi,
             cilt_sorunlari: duzenCiltSorunlari,
+            hamilelik_modu_aktif: duzenHamilelikModu,
           }),
         }
       );
@@ -245,7 +252,7 @@ export default function ProfilScreen() {
           text: "Çıkış Yap",
           style: "destructive",
           onPress: async () => {
-            await AsyncStorage.multiRemove(["cihaz_id", "kullanici_id", "kullanici_isim"]);
+            await AsyncStorage.multiRemove(["kullanici_id", "kullanici_isim", "tur_gosterildi"]);
             router.replace("/onboarding");
           },
         },
@@ -387,6 +394,16 @@ export default function ProfilScreen() {
                   deger={kullanici.cilt_tipi ?? "Belirtilmemiş"}
                   renkler={renkler}
                 />
+                
+                {kullanici.hamilelik_modu_aktif && (
+                  <BilgiKarti
+                    baslik="Hamilelik Modu"
+                    ikon="heart"
+                    deger="Aktif"
+                    renkler={renkler}
+                  />
+                )}
+                
                 <View
                   style={[
                     styles.bilgiKart,
@@ -539,6 +556,21 @@ export default function ProfilScreen() {
                   </View>
                 </View>
 
+                {/* Hamilelik Modu */}
+                <View style={[styles.duzenAlani, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: renkler.surface, padding: 16, borderRadius: 12, borderColor: renkler.border, borderWidth: 1 }]}>
+                  <View style={{ gap: 4, flex: 1 }}>
+                    <ThemedText style={{ fontSize: 16, fontWeight: '600' }}>Hamilelik Modu</ThemedText>
+                    <ThemedText style={{ fontSize: 13, color: renkler.icon, paddingRight: 20 }}>
+                      Bu mod açıkken içerik önerilerinde hamilelikte kullanımı sakıncalı olan ürünler filtrelenir.
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={duzenHamilelikModu}
+                    onValueChange={setDuzenHamilelikModu}
+                    trackColor={{ false: renkler.border, true: renkler.tint }}
+                  />
+                </View>
+
                 {/* Kaydet / İptal */}
                 <View style={styles.eylemler}>
                   <TouchableOpacity
@@ -582,10 +614,19 @@ export default function ProfilScreen() {
           {!duzenlemeAktif && (
             <View style={styles.rutinimBolum}>
               <View style={styles.rutinimBaslikSatir}>
-                <Ionicons name="calendar" size={16} color={renkler.tint} />
-                <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
-                  Rutinim
-                </ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="calendar" size={16} color={renkler.tint} />
+                  <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
+                    Rutinim
+                  </ThemedText>
+                </View>
+                <TouchableOpacity 
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: renkler.tint, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 }}
+                  onPress={() => setManuelModalAcik(true)}
+                >
+                  <Ionicons name="add" size={16} color="#FFF" />
+                  <ThemedText style={{ color: '#FFF', fontSize: 13, fontWeight: '600' }}>İçerik Ekle</ThemedText>
+                </TouchableOpacity>
               </View>
 
               {rutinYukleniyor && (
@@ -755,6 +796,17 @@ export default function ProfilScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <ManuelRutinEkleModal
+        visible={manuelModalAcik}
+        kullaniciId={kullanici?.kullanici_id ?? null}
+        onClose={() => setManuelModalAcik(false)}
+        onEklendi={() => {
+          if (kullanici?.kullanici_id) {
+            rutinleriCek(kullanici.kullanici_id);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -886,7 +938,7 @@ const styles = StyleSheet.create({
   rutinimBaslikSatir: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "space-between",
     marginBottom: 4,
   },
   rutinimBaslik: { fontSize: 16, fontWeight: "700" },

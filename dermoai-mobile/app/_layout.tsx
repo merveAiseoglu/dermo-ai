@@ -6,6 +6,8 @@ import 'react-native-reanimated';
 
 import { AppThemeProvider, useThemeContext } from '@/hooks/ThemeProvider';
 import { useKullanici } from '@/hooks/use-kullanici';
+import { TurProvider } from '@/hooks/TurContext';
+import { TurOverlay } from '@/components/TurOverlay';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -21,11 +23,14 @@ function RootNavigator() {
   
   return (
     <ThemeProvider value={activeTheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
+      <TurProvider>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        </Stack>
+        <TurOverlay />
+      </TurProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

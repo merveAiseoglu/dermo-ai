@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 node_modules/
 .expo/
+test_feedback.py

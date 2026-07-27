@@ -12,6 +12,9 @@ class Icerik(Base):
     hamilelikte_guvenli_mi = Column(Boolean)
     kaynak = Column(String(200))      # pgAdmin'deki kolonla eşleşti
     kaynak_url = Column(String)       # Text tipinin SQLAlchemy karşılığı
+    dogrulanmis_mi = Column(Boolean, nullable=False, default=True)
+    komedojenite_puani = Column(Integer, nullable=True)
+    uyumlu_cilt_tipleri = Column(ARRAY(String), nullable=True)
 
 class Urun(Base):
     __tablename__ = "urunler"
@@ -19,6 +22,7 @@ class Urun(Base):
     marka = Column(String(50), nullable=False)
     urun_adi = Column(String(100), nullable=False)
     gorsel_url = Column(String, nullable=True)
+    barkod = Column(String(50), unique=True, nullable=True)
 
 class UrunIcerik(Base):
     __tablename__ = "urun_icerikleri"
@@ -51,6 +55,7 @@ class Kullanici(Base):
     cihaz_id = Column(String(100), unique=True)
     cilt_sorunlari = Column(ARRAY(String))
     onboarding_tamamlandi = Column(Boolean, default=False)
+    hamilelik_modu_aktif = Column(Boolean, default=False)
 
 
 class AnalizGecmisi(Base):
@@ -79,3 +84,25 @@ class RutinKaydi(Base):
     tarih = Column(Date, server_default=func.current_date())
     
     __table_args__ = (UniqueConstraint('rutin_id', 'tarih', name='_rutin_tarih_uc'),)
+
+class GeriBildirim(Base):
+    __tablename__ = "geri_bildirimler"
+    id = Column(Integer, primary_key=True)
+    kullanici_id = Column(Integer, ForeignKey("kullanicilar.kullanici_id"), nullable=False)
+    icerik_id = Column(Integer, ForeignKey("icerikler.icerik_id"), nullable=False)
+    gun_esigi = Column(Integer, nullable=False)
+    begeni = Column(Boolean, nullable=False)
+    not_metni = Column(String(500), nullable=True)
+    llm_ile_islendi_mi = Column(Boolean, nullable=False, default=False)
+    olusturma_tarihi = Column(DateTime, server_default=func.now(), nullable=False)
+
+class KullaniciOncelikPuani(Base):
+    __tablename__ = "kullanici_oncelik_puanlari"
+    id = Column(Integer, primary_key=True)
+    kullanici_id = Column(Integer, ForeignKey("kullanicilar.kullanici_id"), nullable=False)
+    icerik_id = Column(Integer, ForeignKey("icerikler.icerik_id"), nullable=False)
+    puan = Column(Integer, nullable=False, default=5)
+    guncelleme_tarihi = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint('kullanici_id', 'icerik_id', name='_kullanici_icerik_uc'),)
+

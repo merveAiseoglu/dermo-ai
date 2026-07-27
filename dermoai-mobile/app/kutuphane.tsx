@@ -15,11 +15,13 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useThemeContext } from '@/hooks/ThemeProvider';
 import { API_URL } from '@/hooks/use-kullanici';
+import { RenkRozeti } from '@/components/RenkRozeti';
 
 interface Icerik {
   icerik_id: number;
   icerik_adi: string;
   baz_tipi: string;
+  renk?: string;
 }
 
 export default function KutuphaneScreen() {
@@ -94,9 +96,12 @@ export default function KutuphaneScreen() {
                 onPress={() => router.push(`/icerik/${item.icerik_id}` as any)}
               >
                 <View style={styles.ogeMetinler}>
-                  <ThemedText type="defaultSemiBold" style={{ fontSize: 16 }}>
-                    {item.icerik_adi}
-                  </ThemedText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <ThemedText type="defaultSemiBold" style={{ fontSize: 16 }}>
+                      {item.icerik_adi}
+                    </ThemedText>
+                    <RenkRozeti renk={item.renk} />
+                  </View>
                   <ThemedText style={{ fontSize: 13, color: renkler.icon }}>
                     {item.baz_tipi} bazlı içerik
                   </ThemedText>

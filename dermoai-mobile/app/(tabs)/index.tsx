@@ -24,6 +24,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
+import { GeriBildirimModal, GeriBildirimIcerik } from "@/components/GeriBildirimModal";
 
 // Cilt tipine göre statik ipucu haritası
 const CILT_IPUCU: Record<string, { baslik: string; metin: string; ikon: string }> = {
@@ -100,6 +101,9 @@ export default function HomeScreen() {
 
   const [kullanici, setKullanici] = useState<KullaniciBilgisi | null>(null);
   const [streak, setStreak] = useState<StreakSonucu | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [geriBildirimIcerikler, setGeriBildirimIcerikler] = useState<GeriBildirimIcerik[]>([]);
+  const [gunEsigi, setGunEsigi] = useState<number>(3);
 
   useFocusEffect(
     useCallback(() => {
@@ -125,6 +129,19 @@ export default function HomeScreen() {
           if (streakYanit.ok) {
             const streakData = await streakYanit.json();
             setStreak(streakData);
+            
+            // Geri Bildirim kontrolü
+            if (streakData.streak_gun_sayisi >= 3) {
+               const gbYanit = await fetch(`${API_URL}/geri-bildirim/gerekli-mi?kullanici_id=${veri.kullanici_id}&streak_gun_sayisi=${streakData.streak_gun_sayisi}`);
+               if (gbYanit.ok) {
+                 const gbData = await gbYanit.json();
+                 if (gbData.sorulmali && gbData.icerikler?.length > 0) {
+                    setGeriBildirimIcerikler(gbData.icerikler);
+                    setGunEsigi(gbData.gun_esigi);
+                    setModalVisible(true);
+                 }
+               }
+            }
           }
         } catch (e) {
           // sessizce geç
@@ -333,6 +350,16 @@ export default function HomeScreen() {
           </View>
         </ThemedView>
       </ScrollView>
+
+      {kullanici && (
+        <GeriBildirimModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          icerikler={geriBildirimIcerikler}
+          gun_esigi={gunEsigi}
+          kullanici_id={kullanici.kullanici_id}
+        />
+      )}
     </SafeAreaView>
   );
 }

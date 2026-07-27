@@ -30,6 +30,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { API_URL } from "@/hooks/use-kullanici";
+import { useTur } from "@/hooks/TurContext";
 
 const CINSIYET_SECENEKLERI = ["Kadın", "Erkek", "Belirtmek istemiyorum"];
 
@@ -50,6 +51,8 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const theme = useColorScheme() ?? "light";
   const renkler = Colors[theme];
+  
+  const { turuBaslat } = useTur();
 
   const [adim, setAdim] = useState(1);
 
@@ -129,7 +132,13 @@ export default function OnboardingScreen() {
         await AsyncStorage.setItem("kullanici_id", String(veri.kullanici_id));
         await AsyncStorage.setItem("kullanici_isim", veri.isim);
 
-        router.replace("/(tabs)");
+        // Tur kontrolü
+        const turGosterildi = await AsyncStorage.getItem("tur_gosterildi");
+        if (turGosterildi === "true") {
+          router.replace("/(tabs)");
+        } else {
+          turuBaslat(); // turuBaslat (tabs)'e yönlendirip overlay'i açacak
+        }
       } catch (e: any) {
         setHata("Bir hata oluştu, tekrar deneyin.");
         console.error(e);
