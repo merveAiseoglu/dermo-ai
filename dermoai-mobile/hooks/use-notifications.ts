@@ -87,8 +87,8 @@ export async function bildirimKur(
     try {
       const id = await Notifications.scheduleNotificationAsync({
         content: {
-          title: "🌿 Dermo-AI Rutin",
-          body: `${zamanDilimi} rutinin: ${icerikAdi} kullanım zamanı!`,
+          title: "🧚 Cilt Perin",
+          body: `${zamanDilimi} rutinin için ${icerikAdi} zamanı geldi, parlamaya hazır mısın? ✨`,
           data: { rutin_id: rutinId },
         },
         trigger: {
@@ -136,8 +136,8 @@ export async function bildirimIptalEt(rutinId: number): Promise<void> {
 export async function testBildirimiGonder(icerikAdi: string = "Rutin"): Promise<void> {
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: "🔔 Dermo-AI Test",
-      body: `Test: "${icerikAdi}" hatırlatıcısı bu şekilde görünecek!`,
+      title: "🧚 Cilt Perin Test",
+      body: `Test: "${icerikAdi}" hatırlatıcısı işte böyle görünecek!`,
       data: { test: true },
     },
     trigger: {

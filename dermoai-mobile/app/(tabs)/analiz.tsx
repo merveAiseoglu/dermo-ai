@@ -28,11 +28,6 @@ import { KaynakRozeti } from "@/components/kaynak-rozeti";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { API_URL } from "@/hooks/use-kullanici";
-import {
-  bildirimIptalEt,
-  bildirimKur,
-  izinIste,
-  testBildirimiGonder,
 import { bildirimIptalEt, bildirimKur, izinIste, testBildirimiGonder } from "@/hooks/use-notifications";
 import { BarkodTarayiciModal } from "@/components/BarkodTarayiciModal";
 import { RenkRozeti } from "@/components/RenkRozeti";

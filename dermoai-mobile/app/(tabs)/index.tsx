@@ -25,6 +25,7 @@ import { Colors } from "@/constants/theme";
 import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
 import { GeriBildirimModal, GeriBildirimIcerik } from "@/components/GeriBildirimModal";
+import { CircularGauge } from "@/components/CircularGauge";
 
 // Cilt tipine göre statik ipucu haritası
 const CILT_IPUCU: Record<string, { baslik: string; metin: string; ikon: string }> = {
@@ -101,6 +102,11 @@ export default function HomeScreen() {
 
   const [kullanici, setKullanici] = useState<KullaniciBilgisi | null>(null);
   const [streak, setStreak] = useState<StreakSonucu | null>(null);
+  const [healthScore, setHealthScore] = useState<number | null>(null);
+  const [llmAciklama, setLlmAciklama] = useState<string | null>(null);
+  const [healthScoreDetails, setHealthScoreDetails] = useState<any[]>([]);
+  const [healthScoreUyari, setHealthScoreUyari] = useState<string | null>(null);
+  const [isHealthScoreLoading, setIsHealthScoreLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [geriBildirimIcerikler, setGeriBildirimIcerikler] = useState<GeriBildirimIcerik[]>([]);
   const [gunEsigi, setGunEsigi] = useState<number>(3);
@@ -117,6 +123,22 @@ export default function HomeScreen() {
 
           const veri = await yanit.json();
           setKullanici(veri);
+
+          // Get Health Score
+          try {
+            setIsHealthScoreLoading(true);
+            const hsYanit = await fetch(`${API_URL}/api/routine/health-score/${veri.kullanici_id}`);
+            if (hsYanit.ok) {
+              const hsVeri = await hsYanit.json();
+              setHealthScore(hsVeri.skor);
+              setLlmAciklama(hsVeri.llm_aciklama);
+              setHealthScoreDetails(hsVeri.detaylar || []);
+              setHealthScoreUyari(hsVeri.genel_uyari || null);
+            }
+          } catch (e) {
+          } finally {
+            setIsHealthScoreLoading(false);
+          }
 
           // Frontend saatine göre tarih oluştur
           const d = new Date();
@@ -255,6 +277,73 @@ export default function HomeScreen() {
                   {motivasyonSozuGetir(streak.streak_gun_sayisi)}
                 </ThemedText>
               </View>
+            </View>
+          )}
+
+          {/* ── Sağlık Skoru Kartı ── */}
+          {isHealthScoreLoading ? (
+            <View
+              style={[
+                styles.streakKart,
+                { backgroundColor: renkler.surface, borderColor: renkler.border, alignItems: 'center', padding: 24 },
+              ]}
+            >
+              <ThemedText type="defaultSemiBold" style={{ marginBottom: 12, fontSize: 16 }}>Rutin Sağlık Skoru</ThemedText>
+              <ThemedText style={{ color: renkler.text, opacity: 0.7 }}>Rutinin analiz ediliyor...</ThemedText>
+            </View>
+          ) : healthScore !== null && (
+            <View
+              style={[
+                styles.streakKart,
+                { backgroundColor: renkler.surface, borderColor: renkler.border, alignItems: 'center' },
+              ]}
+            >
+              <ThemedText type="defaultSemiBold" style={{ marginBottom: 16, fontSize: 16 }}>Rutin Sağlık Skoru</ThemedText>
+              <CircularGauge score={healthScore} size={150} />
+              
+              {llmAciklama && (
+                <View style={{ marginTop: 24, backgroundColor: renkler.scoreGreen + '20', padding: 16, borderRadius: 12, width: '100%' }}>
+                  <ThemedText style={{ color: renkler.text, fontSize: 14, lineHeight: 20 }}>
+                    {llmAciklama}
+                  </ThemedText>
+                </View>
+              )}
+
+              {healthScoreDetails.length > 0 && (
+                <View style={{ marginTop: 16, width: '100%' }}>
+                  {healthScoreDetails.map((detay, idx) => {
+                    let badgeColor = '#9CA3AF'; // dogrulanmadi - gray
+                    let badgeText = 'AI Kaynaklı';
+                    
+                    if (detay.dogrulama_durumu === 'dogrulandi') {
+                      badgeColor = '#10B981'; // dogrulandi - mint/green
+                      badgeText = 'Doğrulanmış Kaynak';
+                    } else if (detay.dogrulama_durumu === 'kismi') {
+                      badgeColor = '#F59E0B'; // kismi - amber/yellow
+                      badgeText = 'Kısmen Doğrulanmış';
+                    }
+
+                    return (
+                      <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: renkler.border }}>
+                        <ThemedText style={{ fontSize: 13, color: renkler.text, flex: 1, marginRight: 8 }}>
+                          {detay.icerik_1} + {detay.icerik_2}
+                        </ThemedText>
+                        <View style={{ backgroundColor: badgeColor + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: badgeColor }}>
+                          <ThemedText style={{ fontSize: 10, color: badgeColor, fontWeight: '600' }}>
+                            {badgeText}
+                          </ThemedText>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {healthScoreUyari && (
+                <ThemedText style={{ marginTop: 24, fontSize: 11, color: renkler.icon, textAlign: 'center', fontStyle: 'italic' }}>
+                  {healthScoreUyari}
+                </ThemedText>
+              )}
             </View>
           )}
 

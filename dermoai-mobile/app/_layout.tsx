@@ -8,6 +8,7 @@ import { AppThemeProvider, useThemeContext } from '@/hooks/ThemeProvider';
 import { useKullanici } from '@/hooks/use-kullanici';
 import { TurProvider } from '@/hooks/TurContext';
 import { TurOverlay } from '@/components/TurOverlay';
+import { RozetKutlamaModal } from '@/components/RozetKutlamaModal';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -30,6 +31,7 @@ function RootNavigator() {
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <TurOverlay />
+        <RozetKutlamaModal />
       </TurProvider>
       <StatusBar style="auto" />
     </ThemeProvider>

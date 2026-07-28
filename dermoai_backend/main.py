@@ -5,8 +5,11 @@ from sqlalchemy import or_
 from pydantic import BaseModel
 from typing import Optional
 from database import SessionLocal
-from models import Icerik, UrunIcerik, Cakisma, Urun, Kullanici, AnalizGecmisi, Rutin, Sinerji, RutinKaydi, GeriBildirim, KullaniciOncelikPuani
+from models import Icerik, UrunIcerik, Cakisma, Urun, Kullanici, AnalizGecmisi, Rutin, Sinerji, RutinKaydi, GeriBildirim, KullaniciOncelikPuani, Rozet, KullaniciRozet, LlmAciklamaCache
 from itertools import combinations
+import hashlib
+import os
+from openai import OpenAI
 from dotenv import load_dotenv
 from openai import OpenAI
 import os
@@ -81,6 +84,7 @@ class GeriBildirimYanit(BaseModel):
 
 class BarkodSorgu(BaseModel):
     barkod: str
+    kullanici_id: Optional[int] = None
 
 # ─── Veritabanı Bağımlılığı ───────────────────────────────────────────────────────────
 
@@ -90,6 +94,36 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# ─── Rozet Yardımcı Fonksiyonu ────────────────────────────────────────────────
+def rozet_kontrol_ve_ver(kullanici_id: int, rozet_kodu: str, db: Session):
+    try:
+        rozet_bilgi = db.query(Rozet).filter(Rozet.rozet_kodu == rozet_kodu).first()
+        if not rozet_bilgi:
+            return None
+            
+        mevcut = db.query(KullaniciRozet).filter(
+            KullaniciRozet.kullanici_id == kullanici_id, 
+            KullaniciRozet.rozet_id == rozet_bilgi.rozet_id
+        ).first()
+        
+        if mevcut:
+            return None
+            
+        yeni_rozet = KullaniciRozet(kullanici_id=kullanici_id, rozet_id=rozet_bilgi.rozet_id)
+        db.add(yeni_rozet)
+        db.commit()
+        
+        return {
+            "rozet_kodu": rozet_bilgi.rozet_kodu,
+            "rozet_adi": rozet_bilgi.rozet_adi,
+            "aciklama": rozet_bilgi.aciklama,
+            "emoji": rozet_bilgi.emoji
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"Rozet verme hatası: {e}")
+        return None
 
 # ─── Sabit Listeler (halüsinasyon önleme) ────────────────────────────────────
 
@@ -519,6 +553,14 @@ def icerikleri_ara(
             "komedojenite_puani": i.komedojenite_puani,
             "renk": renk
         })
+        
+    yeni_rozet = None
+    if kullanici_id and (hamilelik_uyumlu or cilt_tipine_uygun or max_komedojenite is not None):
+        yeni_rozet = rozet_kontrol_ve_ver(kullanici_id, "uzman_kullanici", db)
+
+    if yeni_rozet:
+        return {"sonuclar": sonuc, "yeni_rozet_kazanildi": yeni_rozet}
+        
     return sonuc
 
 @app.get("/urunler")
@@ -559,6 +601,27 @@ def icerik_detay_getir(icerik_id: int, db: Session = Depends(get_db)):
     }
 
 # ─── Kullanıcı Endpoint'leri ──────────────────────────────────────────────────
+
+@app.get("/kullanicilar/{kullanici_id}/rozetler")
+def kullanici_rozetleri_getir(kullanici_id: int, db: Session = Depends(get_db)):
+    tum_rozetler = db.query(Rozet).all()
+    kazanilan_rozetler = db.query(KullaniciRozet).filter(KullaniciRozet.kullanici_id == kullanici_id).all()
+    
+    kazanilan_dict = {kr.rozet_id: kr.kazanilma_tarihi for kr in kazanilan_rozetler}
+    
+    sonuc = []
+    for r in tum_rozetler:
+        kazanildi_mi = r.rozet_id in kazanilan_dict
+        sonuc.append({
+            "rozet_kodu": r.rozet_kodu,
+            "rozet_adi": r.rozet_adi,
+            "aciklama": r.aciklama,
+            "emoji": r.emoji,
+            "kazanildi_mi": kazanildi_mi,
+            "kazanilma_tarihi": kazanilan_dict[r.rozet_id].isoformat() if kazanildi_mi and kazanilan_dict[r.rozet_id] else None
+        })
+        
+    return sonuc
 
 @app.post("/kullanici")
 def kullanici_olustur(istek: KullaniciOlustur, db: Session = Depends(get_db)):
@@ -789,7 +852,7 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
                     "icerik_id": i_id,
                     "icerik_adi": icerik_adi_map[i_id],
                     "renk": renk_map[i_id],
-                    "uygun": sonuc["uygun"],
+                    "uygun": True,
                     "oneri": sonuc.get("oneri"),
                     "program": sonuc.get("program")
                 })
@@ -895,32 +958,42 @@ def manuel_rutin_ekle(istek: ManuelRutinEkleIstek, db: Session = Depends(get_db)
     if eklenecek_icerik.komedojenite_puani is not None and eklenecek_icerik.komedojenite_puani >= 3:
         komedojenite_uyarisi = True
 
-    # Eğer onay verilmemişse çakışmaları kontrol et
-    if not istek.onay:
-        aktif_rutinler = db.query(Rutin).filter(
-            Rutin.kullanici_id == istek.kullanici_id, 
-            Rutin.aktif == True
-        ).all()
-        mevcut_icerik_idler = [r.icerik_id for r in aktif_rutinler]
-        
-        bulunan_cakismalar = []
-        for m_id in mevcut_icerik_idler:
-            cakisma = db.query(Cakisma).filter(
-                ((Cakisma.icerik_id_1 == istek.icerik_id) & (Cakisma.icerik_id_2 == m_id)) |
-                ((Cakisma.icerik_id_1 == m_id) & (Cakisma.icerik_id_2 == istek.icerik_id))
-            ).first()
-            if cakisma:
-                diger_icerik = db.query(Icerik).filter(Icerik.icerik_id == m_id).first()
-                bulunan_cakismalar.append({
+    dikkatli_kullan_notlari = []
+    
+    # Tüm aktif rutinlerle karşılaştırma yap (her durumda, çünkü dikkat notlarını uyarı yoksa da döneceğiz)
+    aktif_rutinler = db.query(Rutin).filter(
+        Rutin.kullanici_id == istek.kullanici_id, 
+        Rutin.aktif == True
+    ).all()
+    mevcut_icerik_idler = [r.icerik_id for r in aktif_rutinler]
+    
+    bulunan_engelleyici_cakismalar = []
+    for m_id in mevcut_icerik_idler:
+        cakisma = db.query(Cakisma).filter(
+            ((Cakisma.icerik_id_1 == istek.icerik_id) & (Cakisma.icerik_id_2 == m_id)) |
+            ((Cakisma.icerik_id_1 == m_id) & (Cakisma.icerik_id_2 == istek.icerik_id))
+        ).first()
+        if cakisma:
+            diger_icerik = db.query(Icerik).filter(Icerik.icerik_id == m_id).first()
+            icerik_adi = diger_icerik.icerik_adi if diger_icerik else f"İçerik #{m_id}"
+            if getattr(cakisma, "iliski_tipi", "engelleyici") == "dikkatli_kullan":
+                dikkatli_kullan_notlari.append({
+                    "icerik_adi": icerik_adi,
+                    "kosul_notu": getattr(cakisma, "kosul_notu", None) or cakisma.aciklama
+                })
+            else:
+                bulunan_engelleyici_cakismalar.append({
                     "icerik_id": m_id,
-                    "icerik_adi": diger_icerik.icerik_adi if diger_icerik else f"İçerik #{m_id}",
+                    "icerik_adi": icerik_adi,
                     "aciklama": cakisma.aciklama
                 })
 
-        if bulunan_cakismalar:
+    # Eğer onay verilmemişse sadece engelleyici çakışmaları ve komedojeniteyi kontrol et
+    if not istek.onay:
+        if bulunan_engelleyici_cakismalar:
             return {
                 "uyari": True,
-                "cakismalar": bulunan_cakismalar,
+                "cakismalar": bulunan_engelleyici_cakismalar,
                 "komedojenite_uyarisi": komedojenite_uyarisi,
                 "mesaj": "Çakışma bulundu."
             }
@@ -945,13 +1018,17 @@ def manuel_rutin_ekle(istek: ManuelRutinEkleIstek, db: Session = Depends(get_db)
     db.commit()
     db.refresh(yeni)
 
+    yeni_rozet = rozet_kontrol_ve_ver(istek.kullanici_id, "ilk_adim", db)
+
     return {
         "uyari": False,
         "rutin_id": yeni.rutin_id,
         "icerik_id": yeni.icerik_id,
         "gunler": yeni.gunler,
         "zaman_dilimi": yeni.zaman_dilimi,
-        "aktif": yeni.aktif
+        "aktif": yeni.aktif,
+        "dikkatli_kullan_notlari": dikkatli_kullan_notlari,
+        "yeni_rozet_kazanildi": yeni_rozet
     }
 
 @app.get("/rutin/{kullanici_id}")
@@ -1064,11 +1141,19 @@ def streak_getir(kullanici_id: int, tarih: str = None, db: Session = Depends(get
         kontrol -= timedelta(days=1)
 
     son_kayit_tarihi = max(tarih_seti).isoformat()
+    
+    yeni_rozet = None
+    if streak >= 30:
+        yeni_rozet = rozet_kontrol_ve_ver(kullanici_id, "otuz_gun", db)
+    elif streak >= 7:
+        yeni_rozet = rozet_kontrol_ve_ver(kullanici_id, "yedi_gun", db)
+        
     return {
         "streak_gun_sayisi": streak, 
         "son_kayit_tarihi": son_kayit_tarihi,
         "rozet": rozet_hesapla(streak),
-        "sonraki_esik": sonraki_esik_hesapla(streak)
+        "sonraki_esik": sonraki_esik_hesapla(streak),
+        "yeni_rozet_kazanildi": yeni_rozet
     }
 
 # ─── Geri Bildirim Endpoint'leri ──────────────────────────────────────────────
@@ -1160,11 +1245,16 @@ def barkod_sorgula(sorgu: BarkodSorgu, db: Session = Depends(get_db)):
         icerik_idler = [b.icerik_id for b in icerik_baglari]
         icerikler = db.query(Icerik).filter(Icerik.icerik_id.in_(icerik_idler)).all()
         icerik_listesi = [{"icerik_id": i.icerik_id, "icerik_adi": i.icerik_adi} for i in icerikler]
+        yeni_rozet = None
+        if sorgu.kullanici_id:
+            yeni_rozet = rozet_kontrol_ve_ver(sorgu.kullanici_id, "kasif", db)
+            
         return {
             "bulundu": True,
             "kaynak": "yerel",
             "urun_id": yerel_urun.urun_id,
-            "icerikler": icerik_listesi
+            "icerikler": icerik_listesi,
+            "yeni_rozet_kazanildi": yeni_rozet
         }
     
     # 2. Open Beauty Facts API'sine sor
@@ -1203,7 +1293,10 @@ def barkod_sorgula(sorgu: BarkodSorgu, db: Session = Depends(get_db)):
         eklenen_icerikler = []
         dogrulanmamis_sayisi = 0
         
-        for inci in inci_list:
+        for inci_raw in inci_list:
+            # SQLAlchemy StringDataRightTruncation hatasını önlemek için 100 karaktere kırpıyoruz
+            inci = inci_raw[:97] + "..." if len(inci_raw) > 100 else inci_raw
+            
             mevcut_icerik = db.query(Icerik).filter(Icerik.icerik_adi.ilike(inci)).first()
             if mevcut_icerik:
                 eklenen_icerikler.append(mevcut_icerik)
@@ -1230,6 +1323,10 @@ def barkod_sorgula(sorgu: BarkodSorgu, db: Session = Depends(get_db)):
         icerik_listesi = [{"icerik_id": i.icerik_id, "icerik_adi": i.icerik_adi} for i in eklenen_icerikler]
         print(f"Sonuç: OBF'den ürün eklendi. Eklenen Doğrulanmamış İçerik Sayısı: {dogrulanmamis_sayisi}")
         
+        yeni_rozet = None
+        if sorgu.kullanici_id:
+            yeni_rozet = rozet_kontrol_ve_ver(sorgu.kullanici_id, "kasif", db)
+            
         return {
             "bulundu": True,
             "kaynak": "openbeautyfacts",
@@ -1237,10 +1334,163 @@ def barkod_sorgula(sorgu: BarkodSorgu, db: Session = Depends(get_db)):
             "icerikler": icerik_listesi,
             "dogrulanmamis_icerik_sayisi": dogrulanmamis_sayisi,
             "urun_adi": product_name,
-            "marka": brands
+            "marka": brands,
+            "yeni_rozet_kazanildi": yeni_rozet
         }
         
     except requests.exceptions.RequestException as e:
         # Timeout veya network hatası
         print(f"OBF İstek Hatası (Timeout/Network): {e}")
         return {"bulundu": False, "hata": "NETWORK_ERROR"}
+def hesapla_rutin_saglik_skoru(icerik_idler, db):
+    skor = 100
+    cakisma_sayisi = 0
+    sinerji_sayisi = 0
+    detaylar = []
+
+    # Benzersiz icerikleri alalım
+    tum_icerikler = list(set(icerik_idler))
+
+    for i in range(len(tum_icerikler)):
+        for j in range(i + 1, len(tum_icerikler)):
+            id1 = tum_icerikler[i]
+            id2 = tum_icerikler[j]
+
+            # Çakışma Kontrolü
+            cakisma = db.query(Cakisma).filter(
+                ((Cakisma.icerik_id_1 == id1) & (Cakisma.icerik_id_2 == id2)) |
+                ((Cakisma.icerik_id_1 == id2) & (Cakisma.icerik_id_2 == id1))
+            ).first()
+
+            if cakisma:
+                cakisma_sayisi += 1
+                if cakisma.severity == 'high':
+                    puan = -15
+                elif cakisma.severity == 'low':
+                    puan = -3
+                else:  # medium
+                    puan = -8
+
+                skor += puan
+                i1_isim = db.query(Icerik).filter(Icerik.icerik_id == id1).first().icerik_adi
+                i2_isim = db.query(Icerik).filter(Icerik.icerik_id == id2).first().icerik_adi
+
+                detaylar.append({
+                    'tip': 'cakisma',
+                    'icerik_1': i1_isim,
+                    'icerik_2': i2_isim,
+                    'severity': cakisma.severity,
+                    'puan': puan,
+                    'dogrulama_durumu': cakisma.dogrulama_durumu
+                })
+
+            # Sinerji Kontrolü
+            sinerji = db.query(Sinerji).filter(
+                ((Sinerji.icerik_id_1 == id1) & (Sinerji.icerik_id_2 == id2)) |
+                ((Sinerji.icerik_id_1 == id2) & (Sinerji.icerik_id_2 == id1))
+            ).first()
+
+            if sinerji:
+                sinerji_sayisi += 1
+                skor += 5
+                i1_isim = db.query(Icerik).filter(Icerik.icerik_id == id1).first().icerik_adi
+                i2_isim = db.query(Icerik).filter(Icerik.icerik_id == id2).first().icerik_adi
+
+                detaylar.append({
+                    'tip': 'sinerji',
+                    'icerik_1': i1_isim,
+                    'icerik_2': i2_isim,
+                    'puan': 5,
+                    'dogrulama_durumu': sinerji.dogrulama_durumu
+                })
+
+    skor = max(0, min(100, skor))
+
+    return {
+        'skor': skor,
+        'cakisma_sayisi': cakisma_sayisi,
+        'sinerji_sayisi': sinerji_sayisi,
+        'detaylar': detaylar
+    }
+
+@app.get('/api/routine/health-score/{kullanici_id}')
+def get_routine_health_score(kullanici_id: int, db: Session = Depends(get_db)):
+    rutinler = db.query(Rutin).filter(Rutin.kullanici_id == kullanici_id, Rutin.aktif == True).all()
+    icerik_idler = [r.icerik_id for r in rutinler]
+    sonuc = hesapla_rutin_saglik_skoru(icerik_idler, db)
+
+    # Hash the sorted ingredient IDs
+    sorted_icerikler = sorted(list(set(icerik_idler)))
+    rutin_hash_str = ",".join(map(str, sorted_icerikler))
+    rutin_hash = hashlib.sha256(rutin_hash_str.encode()).hexdigest()
+
+    # Check cache
+    cache_entry = db.query(LlmAciklamaCache).filter(
+        LlmAciklamaCache.kullanici_id == kullanici_id,
+        LlmAciklamaCache.rutin_hash == rutin_hash
+    ).first()
+
+    if cache_entry:
+        sonuc["llm_aciklama"] = cache_entry.aciklama_metni
+        sonuc["genel_uyari"] = "Bu bilgiler AI destekli analiz sonucudur, bilgilendirme amaçlıdır ve tıbbi tavsiye yerine geçmez. Kesin karar için dermatoloğunuza danışınız."
+        return sonuc
+
+    # Prepare static fallback text
+    fallback_text = []
+    for d in sonuc["detaylar"]:
+        # Fetching aciklama logic (since hesapla_rutin_saglik_skoru doesn't return aciklama, we can query it or construct it)
+        pass # We will do a generic fallback if OpenAI fails
+    
+    if not sonuc["detaylar"]:
+        fallback_metin = "Rutininizdeki ürünler arasında bilinen bir çakışma veya sinerji bulunamadı. Dengeli bir rutin kullanıyorsunuz."
+    else:
+        parts = []
+        for d in sonuc["detaylar"]:
+            if d['tip'] == 'cakisma':
+                parts.append(f"{d['icerik_1']} ile {d['icerik_2']} arasında {d['severity']} riskli bir etkileşim var.")
+            else:
+                parts.append(f"{d['icerik_1']} ile {d['icerik_2']} birlikte harika çalışıyor.")
+        fallback_metin = " ".join(parts)
+
+    try:
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if not openai_key:
+            raise Exception("OPENAI_API_KEY missing")
+
+        client = OpenAI(api_key=openai_key)
+        
+        system_prompt = "Sen bir cilt bakımı asistanısın. Kullanıcının rutinindeki ürün etkileşimlerini (çakışma/sinerji) sana verilen teknik açıklamalardan yola çıkarak, samimi ve anlaşılır bir Türkçe ile 2-3 cümlede özetle. Teknik terimleri koru (retinol, AHA/BHA gibi) ama cümle akışını sohbet diline çevir. Yeni bir tıbbi iddia UYDURMA, sadece verilen bilgiyi yeniden ifade et."
+        user_prompt = "Rutin detaylarım:\n"
+        for d in sonuc["detaylar"]:
+            user_prompt += f"- {d['tip'].capitalize()}: {d['icerik_1']} ve {d['icerik_2']}. (Risk: {d.get('severity', 'yok')})\n"
+            
+        if not sonuc["detaylar"]:
+             user_prompt += "Çakışma veya sinerji yok."
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=200
+        )
+        llm_text = response.choices[0].message.content.strip()
+
+        # Save to DB
+        new_cache = LlmAciklamaCache(
+            kullanici_id=kullanici_id,
+            rutin_hash=rutin_hash,
+            aciklama_metni=llm_text
+        )
+        db.add(new_cache)
+        db.commit()
+
+        sonuc["llm_aciklama"] = llm_text
+    except Exception as e:
+        print("LLM Error:", e)
+        sonuc["llm_aciklama"] = fallback_metin
+
+    sonuc["genel_uyari"] = "Bu bilgiler AI destekli analiz sonucudur, bilgilendirme amaçlıdır ve tıbbi tavsiye yerine geçmez. Kesin karar için dermatoloğunuza danışınız."
+    return sonuc

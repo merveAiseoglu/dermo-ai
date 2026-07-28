@@ -12,6 +12,8 @@ class Icerik(Base):
     hamilelikte_guvenli_mi = Column(Boolean)
     kaynak = Column(String(200))      # pgAdmin'deki kolonla eşleşti
     kaynak_url = Column(String)       # Text tipinin SQLAlchemy karşılığı
+    kaynak_tipi = Column(String(50), nullable=True)
+    son_gozden_gecirme_tarihi = Column(Date, nullable=True)
     dogrulanmis_mi = Column(Boolean, nullable=False, default=True)
     komedojenite_puani = Column(Integer, nullable=True)
     uyumlu_cilt_tipleri = Column(ARRAY(String), nullable=True)
@@ -36,6 +38,10 @@ class Cakisma(Base):
     aciklama = Column(String(255))
     kaynak = Column(String(200))
     kaynak_url = Column(String)
+    iliski_tipi = Column(String(50), default="engelleyici")
+    kosul_notu = Column(Text)
+    severity = Column(String(50), default="medium")
+    dogrulama_durumu = Column(String(50), default="dogrulanmadi")
 
 class Sinerji(Base):
     __tablename__ = "sinerjiler"
@@ -44,6 +50,15 @@ class Sinerji(Base):
     aciklama = Column(Text)
     kaynak = Column(String(255))
     kaynak_url = Column(String(255))
+    dogrulama_durumu = Column(String(50), default="dogrulanmadi")
+
+class LlmAciklamaCache(Base):
+    __tablename__ = "llm_aciklama_cache"
+    id = Column(Integer, primary_key=True, index=True)
+    kullanici_id = Column(Integer, nullable=False)
+    rutin_hash = Column(String(64), nullable=False)
+    aciklama_metni = Column(Text, nullable=False)
+    olusturulma_tarihi = Column(DateTime(timezone=True), server_default=func.now())
 
 class Kullanici(Base):
     __tablename__ = "kullanicilar"
@@ -106,3 +121,21 @@ class KullaniciOncelikPuani(Base):
 
     __table_args__ = (UniqueConstraint('kullanici_id', 'icerik_id', name='_kullanici_icerik_uc'),)
 
+
+class Rozet(Base):
+    __tablename__ = "rozetler"
+    rozet_id = Column(Integer, primary_key=True)
+    rozet_kodu = Column(String(50), unique=True)
+    rozet_adi = Column(String(100), nullable=False)
+    aciklama = Column(Text)
+    emoji = Column(String(10))
+
+
+class KullaniciRozet(Base):
+    __tablename__ = "kullanici_rozetleri"
+    id = Column(Integer, primary_key=True)
+    kullanici_id = Column(Integer, ForeignKey("kullanicilar.kullanici_id"))
+    rozet_id = Column(Integer, ForeignKey("rozetler.rozet_id"))
+    kazanilma_tarihi = Column(DateTime, server_default=func.now())
+    
+    __table_args__ = (UniqueConstraint('kullanici_id', 'rozet_id', name='_kullanici_rozet_uc'),)

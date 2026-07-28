@@ -58,6 +58,7 @@ export function ManuelRutinEkleModal({
   const [zamanDilimi, setZamanDilimi] = useState<'Sabah' | 'Akşam'>('Akşam');
   const [gunModu, setGunModu] = useState<'Her gün' | 'Belirli günler'>('Her gün');
   const [seciliGunler, setSeciliGunler] = useState<Set<string>>(new Set(['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar']));
+  const [dikkatliKullanNotlari, setDikkatliKullanNotlari] = useState<{icerik_adi: string, kosul_notu: string}[]>([]);
   
   const [islemYukleniyor, setIslemYukleniyor] = useState(false);
 
@@ -70,13 +71,25 @@ export function ManuelRutinEkleModal({
 
       let params = `q=${aramaMetni}&limit=20`;
       if (filtreHamilelik) params += `&hamilelik_uyumlu=true`;
-      if (filtreCiltTipi) params += `&cilt_tipine_uygun=true&kullanici_id=${kullaniciId || ''}`;
+      if (filtreCiltTipi) params += `&cilt_tipine_uygun=true`;
       if (filtreKomedojenite) params += `&max_komedojenite=2`;
+      if (kullaniciId) params += `&kullanici_id=${kullaniciId}`;
 
       fetch(`${API_URL}/icerikler/ara?${params}`)
         .then((r) => r.json())
         .then((data) => {
-          setSonuclar(data);
+          if (data.sonuclar) {
+            setSonuclar(data.sonuclar);
+            if (data.yeni_rozet_kazanildi) {
+               // Event emitter ile globale bildireceğiz
+               // Şimdilik sadece consola basabiliriz veya DeviceEventEmitter kullanabiliriz
+               import('react-native').then(({ DeviceEventEmitter }) => {
+                 DeviceEventEmitter.emit('yeni_rozet', data.yeni_rozet_kazanildi);
+               });
+            }
+          } else {
+            setSonuclar(data);
+          }
           setYukleniyor(false);
         })
         .catch((e) => {
@@ -97,6 +110,7 @@ export function ManuelRutinEkleModal({
     setFiltreHamilelik(false);
     setFiltreCiltTipi(false);
     setFiltreKomedojenite(false);
+    setDikkatliKullanNotlari([]);
   };
 
   const handleClose = () => {
@@ -170,9 +184,20 @@ export function ManuelRutinEkleModal({
       // Başarılı, bildirimleri kur
       await bildirimKur(data.rutin_id, seciliIcerik.icerik_adi, gunlerDizisi, zamanDilimi);
       
-      Alert.alert('Başarılı', `${seciliIcerik.icerik_adi} rutininize eklendi!`);
-      onEklendi();
-      handleClose();
+      onEklendi(); // Refresh parent component
+
+      if (data.yeni_rozet_kazanildi) {
+        import('react-native').then(({ DeviceEventEmitter }) => {
+          DeviceEventEmitter.emit('yeni_rozet', data.yeni_rozet_kazanildi);
+        });
+      }
+
+      if (data.dikkatli_kullan_notlari && data.dikkatli_kullan_notlari.length > 0) {
+        setDikkatliKullanNotlari(data.dikkatli_kullan_notlari);
+      } else {
+        Alert.alert('Başarılı', `${seciliIcerik.icerik_adi} rutininize eklendi!`);
+        handleClose();
+      }
 
     } catch (e) {
       console.error(e);
@@ -272,13 +297,38 @@ export function ManuelRutinEkleModal({
           </View>
         ) : (
           <ScrollView style={{ flex: 1, padding: 20 }}>
-            <View style={[styles.seciliKutu, { backgroundColor: renkler.primaryLight }]}>
-              <ThemedText type="defaultSemiBold" style={{ fontSize: 18, color: renkler.tint, textAlign: 'center' }}>
-                {seciliIcerik.icerik_adi}
-              </ThemedText>
-            </View>
+            {dikkatliKullanNotlari.length > 0 ? (
+              <View style={{ padding: 20, backgroundColor: '#FFF3CD', borderRadius: 12, marginBottom: 24, borderWidth: 1, borderColor: '#FFEEBA' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+                  <Ionicons name="warning" size={24} color="#856404" />
+                  <ThemedText type="defaultSemiBold" style={{ fontSize: 18, color: '#856404' }}>Dikkatli Kullanım</ThemedText>
+                </View>
+                <ThemedText style={{ color: '#856404', marginBottom: 16 }}>
+                  {seciliIcerik?.icerik_adi} başarıyla eklendi, ancak rutininizdeki diğer içeriklerle kullanımı hakkında aşağıdaki notlara dikkat ediniz:
+                </ThemedText>
+                {dikkatliKullanNotlari.map((not, idx) => (
+                  <View key={idx} style={{ marginBottom: 12 }}>
+                    <ThemedText style={{ color: '#856404', fontWeight: 'bold' }}>• {not.icerik_adi} ile:</ThemedText>
+                    <ThemedText style={{ color: '#856404', marginTop: 4 }}>{not.kosul_notu}</ThemedText>
+                  </View>
+                ))}
+                
+                <TouchableOpacity
+                  style={[styles.onayButon, { backgroundColor: '#856404', marginTop: 20 }]}
+                  onPress={handleClose}
+                >
+                  <ThemedText style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>Tamam, Anladım</ThemedText>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <View style={[styles.seciliKutu, { backgroundColor: renkler.primaryLight }]}>
+                  <ThemedText type="defaultSemiBold" style={{ fontSize: 18, color: renkler.tint, textAlign: 'center' }}>
+                    {seciliIcerik.icerik_adi}
+                  </ThemedText>
+                </View>
 
-            <ThemedText type="defaultSemiBold" style={styles.secimBaslik}>Zaman Dilimi</ThemedText>
+                <ThemedText type="defaultSemiBold" style={styles.secimBaslik}>Zaman Dilimi</ThemedText>
             <View style={styles.butonSatiri}>
               {(['Sabah', 'Akşam'] as const).map(z => (
                 <TouchableOpacity
@@ -345,6 +395,8 @@ export function ManuelRutinEkleModal({
             <TouchableOpacity style={{ marginTop: 20, alignItems: 'center' }} onPress={() => setSeciliIcerik(null)} disabled={islemYukleniyor}>
               <ThemedText style={{ color: renkler.icon }}>Geri Dön</ThemedText>
             </TouchableOpacity>
+            </>
+            )}
           </ScrollView>
         )}
       </KeyboardAvoidingView>

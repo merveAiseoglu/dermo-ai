@@ -21,12 +21,16 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Text,
   Switch,
+  Image,
+  DeviceEventEmitter,
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ManuelRutinEkleModal } from "@/components/ManuelRutinEkleModal";
+import { BitkiKarakteri } from "@/components/BitkiKarakteri";
 import { Colors } from "@/constants/theme";
 import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
@@ -111,6 +115,13 @@ export default function ProfilScreen() {
   const [rutinYukleniyor, setRutinYukleniyor] = useState(false);
   const [isaretlenenRutinler, setIsaretlenenRutinler] = useState<Set<number>>(new Set());
   const [manuelModalAcik, setManuelModalAcik] = useState(false);
+  
+  // Streak
+  const [streakGunSayisi, setStreakGunSayisi] = useState<number>(0);
+  const [streakKutlama, setStreakKutlama] = useState<boolean>(false);
+  
+  // Rozetler
+  const [rozetler, setRozetler] = useState<any[]>([]);
 
   // Düzenleme alanları
   const [duzenIsim, setDuzenIsim] = useState("");
@@ -133,6 +144,29 @@ export default function ProfilScreen() {
       setKullanici(veri);
 
       rutinleriCek(veri.kullanici_id);
+
+      // Streak verisini çek
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const localTarih = `${yyyy}-${mm}-${dd}`;
+      
+      const sYanit = await fetch(`${API_URL}/streak/${veri.kullanici_id}?tarih=${localTarih}`);
+      if (sYanit.ok) {
+        const sData = await sYanit.json();
+        setStreakGunSayisi(sData.streak_gun_sayisi || 0);
+        if (sData.yeni_rozet_kazanildi) {
+          DeviceEventEmitter.emit('yeni_rozet', sData.yeni_rozet_kazanildi);
+        }
+      }
+
+      // Rozetleri çek
+      const rYanit = await fetch(`${API_URL}/kullanicilar/${veri.kullanici_id}/rozetler`);
+      if (rYanit.ok) {
+        const rData = await rYanit.json();
+        setRozetler(rData);
+      }
 
       const yeniDurumlar: Record<string, boolean> = {};
       for (const hijyen of HIJYEN_HATIRLATICILARI) {
@@ -318,8 +352,19 @@ export default function ProfilScreen() {
               const data2 = await sYanit2.json();
               const yeniStreak = data2.streak_gun_sayisi || 0;
               
-              if (yeniStreak > eskiStreak && [3, 7, 30].includes(yeniStreak)) {
-                Alert.alert("🎉 Tebrikler!", `${yeniStreak} Gün Rozetini Kazandın!`);
+              if (yeniStreak > eskiStreak) {
+                setStreakGunSayisi(yeniStreak);
+                setStreakKutlama(true);
+                setTimeout(() => setStreakKutlama(false), 3000);
+              }
+              
+              if (data2.yeni_rozet_kazanildi) {
+                DeviceEventEmitter.emit('yeni_rozet', data2.yeni_rozet_kazanildi);
+                // Rozetleri yenile
+                fetch(`${API_URL}/kullanicilar/${kullanici.kullanici_id}/rozetler`)
+                  .then(r => r.json())
+                  .then(data => setRozetler(data))
+                  .catch(() => {});
               }
             }
           } catch (e) {}
@@ -384,6 +429,11 @@ export default function ProfilScreen() {
                 </ThemedText>
               )}
             </View>
+
+            {/* Bitki Karakteri (Streak) */}
+            {!duzenlemeAktif && kullanici && (
+              <BitkiKarakteri streak={streakGunSayisi} kutlamaYap={streakKutlama} />
+            )}
 
             {/* ── GÖRÜNTÜLEME MODU ── */}
             {!duzenlemeAktif && kullanici && (
@@ -695,11 +745,18 @@ export default function ProfilScreen() {
           {/* ── Cilt Hijyeni Hatırlatıcıları Bölümü ── */}
           {!duzenlemeAktif && (
             <View style={styles.rutinimBolum}>
-              <View style={styles.rutinimBaslikSatir}>
-                <Ionicons name="water-outline" size={16} color={renkler.tint} />
-                <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
-                  Cilt Hijyeni Hatırlatıcıları
-                </ThemedText>
+              <View style={[styles.rutinimBaslikSatir, { justifyContent: 'space-between' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="water-outline" size={16} color={renkler.tint} />
+                  <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
+                    Cilt Hijyeni Hatırlatıcıları
+                  </ThemedText>
+                </View>
+                <Image 
+                  source={require('@/assets/images/karakterler/peri-maskot.png')} 
+                  style={{ width: 40, height: 40 }} 
+                  resizeMode="contain" 
+                />
               </View>
 
               {HIJYEN_HATIRLATICILARI.map((hijyen) => (
@@ -726,6 +783,43 @@ export default function ProfilScreen() {
                   />
                 </View>
               ))}
+            </View>
+          )}
+
+          {/* ── Rozetlerim Bölümü ── */}
+          {!duzenlemeAktif && rozetler.length > 0 && (
+            <View style={styles.rutinimBolum}>
+              <View style={styles.rutinimBaslikSatir}>
+                <Ionicons name="medal-outline" size={16} color={renkler.tint} />
+                <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
+                  Rozetlerim ({rozetler.filter(r => r.kazanildi_mi).length}/{rozetler.length})
+                </ThemedText>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' }}>
+                {rozetler.map((rozet, idx) => (
+                  <TouchableOpacity 
+                    key={idx} 
+                    onPress={() => Alert.alert(
+                      rozet.rozet_adi, 
+                      rozet.kazanildi_mi 
+                        ? `${rozet.aciklama}\n\nBu rozeti kazandın! 🎉`
+                        : `${rozet.aciklama}\n\nHenüz kazanılmadı. 🔒`
+                    )}
+                    style={[
+                      styles.rozetKarti, 
+                      { 
+                        backgroundColor: rozet.kazanildi_mi ? renkler.primaryLight : (renkler.surface + '80'),
+                        borderColor: rozet.kazanildi_mi ? renkler.tint : renkler.border
+                      }
+                    ]}
+                  >
+                    <Text style={{ fontSize: 32, opacity: rozet.kazanildi_mi ? 1 : 0.3 }}>{rozet.emoji}</Text>
+                    <ThemedText style={{ fontSize: 12, fontWeight: 'bold', textAlign: 'center', marginTop: 4, color: rozet.kazanildi_mi ? renkler.text : renkler.icon }}>
+                      {rozet.rozet_adi}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           )}
 
@@ -905,6 +999,15 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1.5,
     borderRadius: 10,
+  },
+  rozetKarti: {
+    width: '30%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 8,
   },
   eylemler: { flexDirection: "row", gap: 10, marginTop: 8 },
   eylemButon: {

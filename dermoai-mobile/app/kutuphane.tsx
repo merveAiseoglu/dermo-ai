@@ -14,8 +14,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useThemeContext } from '@/hooks/ThemeProvider';
-import { API_URL } from '@/hooks/use-kullanici';
+import { useKullanici, API_URL } from '@/hooks/use-kullanici';
 import { RenkRozeti } from '@/components/RenkRozeti';
+import { ScrollView } from 'react-native';
 
 interface Icerik {
   icerik_id: number;
@@ -29,26 +30,48 @@ export default function KutuphaneScreen() {
   const renkler = Colors[theme];
   const router = useRouter();
 
+  const { kullaniciId } = useKullanici();
   const [icerikler, setIcerikler] = useState<Icerik[]>([]);
   const [aramaMetni, setAramaMetni] = useState('');
   const [yukleniyor, setYukleniyor] = useState(true);
 
-  useEffect(() => {
-    fetch(`${API_URL}/icerikler`)
-      .then((res) => res.json())
-      .then((data) => {
-        setIcerikler(data);
-        setYukleniyor(false);
-      })
-      .catch((err) => {
-        console.error(err);
-        setYukleniyor(false);
-      });
-  }, []);
+  const [filtreHamilelik, setFiltreHamilelik] = useState(false);
+  const [filtreCiltTipi, setFiltreCiltTipi] = useState(false);
+  const [filtreKomedojenite, setFiltreKomedojenite] = useState(false);
 
-  const filtrelenmisIcerikler = icerikler.filter((icerik) =>
-    icerik.icerik_adi.toLowerCase().includes(aramaMetni.toLowerCase())
-  );
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      setYukleniyor(true);
+      
+      let params = `q=${aramaMetni}&limit=50`;
+      if (filtreHamilelik) params += `&hamilelik_uyumlu=true`;
+      if (filtreCiltTipi) params += `&cilt_tipine_uygun=true`;
+      if (filtreKomedojenite) params += `&max_komedojenite=2`;
+      if (kullaniciId) params += `&kullanici_id=${kullaniciId}`;
+
+      fetch(`${API_URL}/icerikler/ara?${params}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setIcerikler(data.sonuclar || data);
+          
+          if (data.yeni_rozet_kazanildi) {
+             import('react-native').then(({ DeviceEventEmitter }) => {
+               DeviceEventEmitter.emit('yeni_rozet', data.yeni_rozet_kazanildi);
+             });
+          }
+          
+          setYukleniyor(false);
+        })
+        .catch((err) => {
+          console.error(err);
+          setYukleniyor(false);
+        });
+    }, 300);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [aramaMetni, filtreHamilelik, filtreCiltTipi, filtreKomedojenite, kullaniciId]);
+
+  const filtrelenmisIcerikler = icerikler;
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: renkler.background }]}>
@@ -77,6 +100,29 @@ export default function KutuphaneScreen() {
               <Ionicons name="close-circle" size={20} color={renkler.icon} />
             </TouchableOpacity>
           )}
+        </View>
+
+        <View style={{ height: 40, marginBottom: 16 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 20 }}>
+            <TouchableOpacity
+              style={[styles.filtreChip, { backgroundColor: filtreHamilelik ? renkler.tint : 'transparent', borderColor: renkler.tint }]}
+              onPress={() => setFiltreHamilelik(!filtreHamilelik)}
+            >
+              <ThemedText style={{ color: filtreHamilelik ? '#FFF' : renkler.tint, fontSize: 13, fontWeight: '600' }}>🤰 Hamileliğe Uygun</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filtreChip, { backgroundColor: filtreCiltTipi ? renkler.tint : 'transparent', borderColor: renkler.tint }]}
+              onPress={() => setFiltreCiltTipi(!filtreCiltTipi)}
+            >
+              <ThemedText style={{ color: filtreCiltTipi ? '#FFF' : renkler.tint, fontSize: 13, fontWeight: '600' }}>💧 Cilt Tipime Uygun</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filtreChip, { backgroundColor: filtreKomedojenite ? renkler.tint : 'transparent', borderColor: renkler.tint }]}
+              onPress={() => setFiltreKomedojenite(!filtreKomedojenite)}
+            >
+              <ThemedText style={{ color: filtreKomedojenite ? '#FFF' : renkler.tint, fontSize: 13, fontWeight: '600' }}>✨ Komedojenik Değil</ThemedText>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
 
         {yukleniyor ? (
@@ -150,4 +196,12 @@ const styles = StyleSheet.create({
   },
   ogeMetinler: { flex: 1, gap: 4 },
   merkez: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  filtreChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });

@@ -18,6 +18,9 @@ export const Colors = {
     dangerLight: "#FEF2F2",
     success: "#16A34A",
     successLight: "#F0FDF4",
+    scoreGreen: "#10B981", // Emerald 500
+    scoreYellow: "#F59E0B", // Amber 500
+    scoreRed: "#EF4444", // Red 500
   },
   dark: {
     text: "#ECEDEE",
@@ -33,6 +36,9 @@ export const Colors = {
     dangerLight: "#2E1B1B",
     success: "#4ADE80",
     successLight: "#1B2E1F",
+    scoreGreen: "#34D399", // Emerald 400
+    scoreYellow: "#FBBF24", // Amber 400
+    scoreRed: "#F87171", // Red 400
   },
 };
 

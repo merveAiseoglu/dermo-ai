@@ -13,9 +13,13 @@ interface BarkodTarayiciModalProps {
   onProductFound: (urunId: number, urunAdi: string, marka: string) => void;
 }
 
+import { useKullanici } from '@/hooks/use-kullanici';
+import { DeviceEventEmitter } from 'react-native';
+
 export function BarkodTarayiciModal({ visible, onClose, onProductFound }: BarkodTarayiciModalProps) {
   const { activeTheme: theme } = useThemeContext();
   const renkler = Colors[theme];
+  const { kullaniciId } = useKullanici();
   
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -43,10 +47,14 @@ export function BarkodTarayiciModal({ visible, onClose, onProductFound }: Barkod
       const response = await fetch(`${API_URL}/urun/barkod-sorgula`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ barkod: data }),
+        body: JSON.stringify({ barkod: data, kullanici_id: kullaniciId }),
       });
 
       const result = await response.json();
+
+      if (result.yeni_rozet_kazanildi) {
+        DeviceEventEmitter.emit('yeni_rozet', result.yeni_rozet_kazanildi);
+      }
 
       if (result.bulundu) {
         if (result.dogrulanmamis_icerik_sayisi && result.dogrulanmamis_icerik_sayisi > 0) {
