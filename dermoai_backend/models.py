@@ -17,6 +17,7 @@ class Icerik(Base):
     dogrulanmis_mi = Column(Boolean, nullable=False, default=True)
     komedojenite_puani = Column(Integer, nullable=True)
     uyumlu_cilt_tipleri = Column(ARRAY(String), nullable=True)
+    kullanim_talimati = Column(Text, nullable=True)
 
 class Urun(Base):
     __tablename__ = "urunler"
@@ -86,7 +87,9 @@ class Rutin(Base):
     __tablename__ = "rutinler"
     rutin_id         = Column(Integer, primary_key=True)
     kullanici_id     = Column(Integer, ForeignKey("kullanicilar.kullanici_id"))
-    icerik_id        = Column(Integer, ForeignKey("icerikler.icerik_id"))
+    icerik_id        = Column(Integer, ForeignKey("icerikler.icerik_id"), nullable=True)
+    serbest_urun_adi = Column(String(255), nullable=True)
+    kapsam_disi      = Column(Boolean, default=False)
     gunler           = Column(ARRAY(String))
     zaman_dilimi     = Column(String(20))
     aktif            = Column(Boolean, default=True)

@@ -12,7 +12,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -29,7 +29,7 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { API_URL } from "@/hooks/use-kullanici";
+import { API_URL, uuidOlustur } from "@/hooks/use-kullanici";
 import { useTur } from "@/hooks/TurContext";
 
 const CINSIYET_SECENEKLERI = ["Kadın", "Erkek", "Belirtmek istemiyorum"];
@@ -56,6 +56,19 @@ export default function OnboardingScreen() {
 
   const [adim, setAdim] = useState(1);
 
+  // Cihaz ID'nin hazır olduğundan emin ol
+  useEffect(() => {
+    const cihazIdHazirla = async () => {
+      let mevcutCihazId = await AsyncStorage.getItem("cihaz_id");
+      if (!mevcutCihazId) {
+        mevcutCihazId = uuidOlustur();
+        await AsyncStorage.setItem("cihaz_id", mevcutCihazId);
+        console.log("[GUARD] cihazId üretildi ve kaydedildi:", mevcutCihazId);
+      }
+    };
+    cihazIdHazirla();
+  }, []);
+
   // Adım 1
   const [isim, setIsim] = useState("");
 
@@ -79,6 +92,7 @@ export default function OnboardingScreen() {
 
   const devamEt = async () => {
     setHata(null);
+    console.log("[KAYIT] Fonksiyon tetiklendi, adim:", adim);
 
     // ── Adım 1: İsim doğrulama ──
     if (adim === 1) {
@@ -113,17 +127,20 @@ export default function OnboardingScreen() {
         const cihazId = await AsyncStorage.getItem("cihaz_id");
         if (!cihazId) throw new Error("Cihaz ID bulunamadı");
 
+        const bodyData = {
+          cihaz_id: cihazId,
+          isim: isim.trim(),
+          yas: yas ? Number(yas) : null,
+          cinsiyet: cinsiyet ?? null,
+          cilt_tipi: ciltTipi,
+          cilt_sorunlari: ciltSorunlari,
+        };
+        console.log("[KAYIT] İstek gönderiliyor:", `${API_URL}/kullanici`, "body:", JSON.stringify(bodyData));
+
         const yanit = await fetch(`${API_URL}/kullanici`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cihaz_id: cihazId,
-            isim: isim.trim(),
-            yas: yas ? Number(yas) : null,
-            cinsiyet: cinsiyet ?? null,
-            cilt_tipi: ciltTipi,
-            cilt_sorunlari: ciltSorunlari,
-          }),
+          body: JSON.stringify(bodyData),
         });
 
         if (!yanit.ok) throw new Error("Kayıt başarısız");
@@ -140,8 +157,8 @@ export default function OnboardingScreen() {
           turuBaslat(); // turuBaslat (tabs)'e yönlendirip overlay'i açacak
         }
       } catch (e: any) {
+        console.error("[KAYIT] Hata:", e);
         setHata("Bir hata oluştu, tekrar deneyin.");
-        console.error(e);
       } finally {
         setYukleniyor(false);
       }

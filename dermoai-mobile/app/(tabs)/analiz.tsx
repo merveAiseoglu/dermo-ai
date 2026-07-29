@@ -11,7 +11,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Linking,
   SafeAreaView,
@@ -26,7 +25,10 @@ import { ThemedView } from "@/components/themed-view";
 import { UrunGorseli } from "@/components/urun-gorseli";
 import { KaynakRozeti } from "@/components/kaynak-rozeti";
 import { Colors } from "@/constants/theme";
+import { useThemeContext } from "@/hooks/ThemeProvider";
+import { CustomAlert as Alert } from '@/components/OzelAlert';
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useRouter } from "expo-router";
 import { API_URL } from "@/hooks/use-kullanici";
 import { bildirimIptalEt, bildirimKur, izinIste, testBildirimiGonder } from "@/hooks/use-notifications";
 import { BarkodTarayiciModal } from "@/components/BarkodTarayiciModal";
@@ -120,6 +122,7 @@ interface AnalizSonucu {
 export default function AnalizScreen() {
   const theme = useColorScheme() ?? "light";
   const renkler = Colors[theme];
+  const router = useRouter();
 
   const [urunler, setUrunler] = useState<Urun[]>([]);
   const [seciliUrunler, setSeciliUrunler] = useState<number[]>([]);
@@ -138,6 +141,7 @@ export default function AnalizScreen() {
   const izinIstendi = useRef(false);
 
   const urunleriGetir = () => {
+    console.log("[API] İstek gönderiliyor:", `${API_URL}/urunler`);
     fetch(`${API_URL}/urunler`)
       .then((r) => r.json())
       .then(setUrunler)
@@ -199,6 +203,7 @@ export default function AnalizScreen() {
     };
     console.log("ANALIZ ISTEGI:", JSON.stringify(payload));
 
+    console.log("[API] İstek gönderiliyor:", `${API_URL}/analiz`);
     fetch(`${API_URL}/analiz`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -225,6 +230,7 @@ export default function AnalizScreen() {
   // ─── Çakışma için Rutine Ekle ─────────────────────────────────────────────
 
   const cakismaRutineEkle = async (cakisma: Cakisma) => {
+    console.log("[GUARD] kullaniciId:", kullaniciId);
     if (!kullaniciId) {
       Alert.alert("Giriş gerekli", "Rutine eklemek için lütfen önce onboarding'i tamamla.");
       return;
@@ -241,6 +247,7 @@ export default function AnalizScreen() {
       const { program } = cakisma;
 
       // İçerik 1 → POST /rutin
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin`);
       const yanit1 = await fetch(`${API_URL}/rutin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -255,6 +262,7 @@ export default function AnalizScreen() {
       const rutin1 = await yanit1.json();
 
       // İçerik 2 → POST /rutin
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin`);
       const yanit2 = await fetch(`${API_URL}/rutin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -294,6 +302,7 @@ export default function AnalizScreen() {
   // ─── Sinerji için Rutine Ekle ─────────────────────────────────────────────
 
   const sinerjiRutineEkle = async (sinerji: Sinerji) => {
+    console.log("[GUARD] kullaniciId:", kullaniciId);
     if (!kullaniciId) {
       Alert.alert("Giriş gerekli", "Rutine eklemek için lütfen önce onboarding'i tamamla.");
       return;
@@ -310,6 +319,7 @@ export default function AnalizScreen() {
       const { program } = sinerji;
 
       // İçerik 1 → POST /rutin
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin`);
       const yanit1 = await fetch(`${API_URL}/rutin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -324,6 +334,7 @@ export default function AnalizScreen() {
       const rutin1 = await yanit1.json();
 
       // İçerik 2 → POST /rutin
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin`);
       const yanit2 = await fetch(`${API_URL}/rutin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -363,6 +374,7 @@ export default function AnalizScreen() {
   // ─── Tekli Öneri için Rutine Ekle ────────────────────────────────────────
 
   const tekliRutineEkle = async (oneri: TekliOneri) => {
+    console.log("[GUARD] kullaniciId:", kullaniciId);
     if (!kullaniciId) {
       Alert.alert("Giriş gerekli", "Rutine eklemek için lütfen önce onboarding'i tamamla.");
       return;
@@ -376,12 +388,14 @@ export default function AnalizScreen() {
     setRutineEkleniyor(anahtar);
 
     try {
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin`);
       const yanit = await fetch(`${API_URL}/rutin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kullanici_id: kullaniciId,
-          icerik_id: oneri.icerik_id,
+          icerik_id: oneri.icerik_id === -1 ? null : oneri.icerik_id,
+          serbest_urun_adi: oneri.icerik_id === -1 ? oneri.icerik_adi : null,
           gunler: oneri.program.gunler,
           zaman_dilimi: oneri.program.zaman_dilimi,
         }),
@@ -716,30 +730,6 @@ export default function AnalizScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* TODO: Sunum/teslim öncesi bu test butonunu kaldır */}
-        {__DEV__ && (
-          <TouchableOpacity
-            onPress={async () => {
-              // Buton artık bağımsız, sabit bir metinle test gönderelim
-              await testBildirimiGonder("Test İçeriği");
-              Alert.alert(
-                "🔔 Test Bildirimi Gönderildi",
-                "1 dakika sonra bildirim gelecek. Uygulamayı arka plana al."
-              );
-            }}
-            activeOpacity={0.8}
-            style={[
-              styles.demoButon,
-              { backgroundColor: renkler.surface, borderColor: renkler.border, marginBottom: 16 },
-            ]}
-          >
-            <Ionicons name="notifications-outline" size={16} color={renkler.icon} />
-            <ThemedText style={[styles.demoButonYazi, { color: renkler.icon }]}>
-              🔔 Test Bildirimi (1 dk sonra)
-            </ThemedText>
-          </TouchableOpacity>
-        )}
-
         <FlatList
           data={urunler}
           keyExtractor={(item) => item.urun_id.toString()}
@@ -760,22 +750,52 @@ export default function AnalizScreen() {
                 style={[
                   styles.urunKutusu,
                   {
-                    backgroundColor: secili ? renkler.primaryLight : renkler.surface,
-                    borderColor: secili ? renkler.tint : renkler.border,
+                    backgroundColor: secili ? `rgba(74, 124, 111, 0.05)` : renkler.surface,
+                    borderColor: secili ? renkler.tint : (theme === 'dark' ? '#333' : '#E5E5E5'),
+                    borderWidth: secili ? 2 : 1,
+                    minHeight: 76,
+                    padding: 12,
+                    alignItems: 'center',
                   },
                 ]}
               >
-                <View style={[styles.urunSatiri, { gap: 12 }]}>
-                  <UrunGorseli gorselUrl={item.gorsel_url} marka={item.marka} boyut={40} />
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="defaultSemiBold">{item.marka}</ThemedText>
-                    <ThemedText style={{ color: renkler.icon, fontSize: 14 }}>
-                      {item.urun_adi}
-                    </ThemedText>
+                <View style={[styles.urunSatiri, { gap: 12, width: '100%' }]}>
+                  <View style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 12,
+                    borderWidth: secili ? 0 : 1,
+                    borderColor: '#ccc',
+                    backgroundColor: secili ? renkler.tint : 'transparent',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}>
+                    {secili && <Ionicons name="checkmark" size={16} color="#fff" />}
                   </View>
-                  {secili && (
-                    <Ionicons name="checkmark-circle" size={22} color={renkler.tint} />
-                  )}
+                  <UrunGorseli 
+                    gorselUrl={item.gorsel_url} 
+                    marka={item.marka === "Bilinmeyen Marka" ? item.urun_adi : item.marka} 
+                    boyut={40} 
+                  />
+                  <View style={{ flex: 1, justifyContent: 'center' }}>
+                    {item.marka === "Bilinmeyen Marka" ? (
+                      <>
+                        <ThemedText type="defaultSemiBold" numberOfLines={1}>{item.urun_adi}</ThemedText>
+                        <TouchableOpacity onPress={() => router.push(`/urun-duzenle/${item.urun_id}` as any)}>
+                          <ThemedText style={{ color: renkler.icon, fontSize: 12, marginTop: 2 }}>
+                            Marka bulunamadı, düzenlemek için dokun
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <>
+                        <ThemedText type="defaultSemiBold" numberOfLines={1}>{item.marka}</ThemedText>
+                        <ThemedText style={{ color: renkler.icon, fontSize: 14 }} numberOfLines={1} ellipsizeMode="tail">
+                          {item.urun_adi}
+                        </ThemedText>
+                      </>
+                    )}
+                  </View>
                 </View>
               </TouchableOpacity>
             );
@@ -801,7 +821,7 @@ export default function AnalizScreen() {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <ThemedText style={styles.anaButonYazi}>
-                    {seciliUrunler.length < 2 ? "En az 2 ürün seç" : "Analiz Et"}
+                    {seciliUrunler.length < 2 ? "En az 2 ürün seç" : `${seciliUrunler.length} Ürünü Analiz Et`}
                   </ThemedText>
                 )}
               </TouchableOpacity>

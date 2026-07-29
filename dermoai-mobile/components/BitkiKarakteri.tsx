@@ -7,6 +7,7 @@ import { Colors } from '@/constants/theme';
 interface BitkiKarakteriProps {
   streak: number;
   kutlamaYap: boolean;
+  kompakt?: boolean;
 }
 
 const ASAMALAR = [
@@ -18,7 +19,7 @@ const ASAMALAR = [
   { min: 30, max: Infinity, isim: 'Çiçek Açtı', resim: require('@/assets/images/karakterler/bitki-asama-5.png') },
 ];
 
-export function BitkiKarakteri({ streak, kutlamaYap }: BitkiKarakteriProps) {
+export function BitkiKarakteri({ streak, kutlamaYap, kompakt = false }: BitkiKarakteriProps) {
   const { activeTheme } = useThemeContext();
   const renkler = Colors[activeTheme];
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -44,6 +45,18 @@ export function BitkiKarakteri({ streak, kutlamaYap }: BitkiKarakteriProps) {
       ]).start();
     }
   }, [kutlamaYap]);
+
+  if (kompakt) {
+    return (
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.Image 
+          source={aktifAsama.resim} 
+          style={[{ width: 60, height: 60 }, { transform: [{ scale: scaleAnim }] }]} 
+          resizeMode="contain"
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: renkler.surface, borderColor: renkler.border }]}>

@@ -54,10 +54,14 @@ export default function KutuphaneScreen() {
         .then((data) => {
           setIcerikler(data.sonuclar || data);
           
-          if (data.yeni_rozet_kazanildi) {
-             import('react-native').then(({ DeviceEventEmitter }) => {
-               DeviceEventEmitter.emit('yeni_rozet', data.yeni_rozet_kazanildi);
-             });
+          if (data.yeni_rozetler && data.yeni_rozetler.length > 0) {
+            import('react-native').then(({ DeviceEventEmitter }) => {
+               DeviceEventEmitter.emit('yeni_rozet_kuyrugu', data.yeni_rozetler);
+            });
+          } else if (data.yeni_rozet_kazanildi) {
+            import('react-native').then(({ DeviceEventEmitter }) => {
+               DeviceEventEmitter.emit('yeni_rozet_kuyrugu', [data.yeni_rozet_kazanildi]);
+            });
           }
           
           setYukleniyor(false);

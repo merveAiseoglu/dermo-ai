@@ -27,7 +27,7 @@ export interface KullaniciBilgisi {
   onboarding_tamamlandi: boolean;
 }
 
-function uuidOlustur(): string {
+export function uuidOlustur(): string {
   // Expo'da expo-crypto yoksa güvenli fallback UUID v4
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -64,6 +64,7 @@ export function useKullanici() {
       setCihazId(mevcutCihazId);
 
       // 3) Backend'den kullanıcı bilgisini çek
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanici/cihaz/${mevcutCihazId}`);
       const yanit = await fetch(
         `${API_URL}/kullanici/cihaz/${mevcutCihazId}`
       );

@@ -19,9 +19,6 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
-print("KEY UZUNLUĞU:", len(api_key) if api_key else "KEY BULUNAMADI")
-print("KEY BAŞI:", api_key[:15] if api_key else "YOK")
-print("KEY SONU:", api_key[-10:] if api_key else "YOK")
 
 app = FastAPI()
 
@@ -56,7 +53,8 @@ class KullaniciGuncelle(BaseModel):
 
 class RutinOlustur(BaseModel):
     kullanici_id: int
-    icerik_id: int
+    icerik_id: Optional[int] = None
+    serbest_urun_adi: Optional[str] = None
     gunler: list[str]
     zaman_dilimi: str
 
@@ -70,6 +68,12 @@ class ManuelRutinEkleIstek(BaseModel):
     gunler: list[str]
     zaman_dilimi: str
     onay: bool = False
+
+class ManuelSerbestEkleIstek(BaseModel):
+    kullanici_id: int
+    serbest_urun_adi: str
+    gunler: list[str]
+    zaman_dilimi: str
 
 class GeriBildirimOlustur(BaseModel):
     icerik_id: int
@@ -356,35 +360,72 @@ KURALLAR — ONERİ (oneri alanı):
         print(f"ai_sinerji_analiz_et hata: {e}")
         return {"oneri": "Bu iki içeriği aynı rutinde güvenle kullanabilirsiniz.", "program": None}
 
+import re
 
-def tekli_oneri_al(
-    icerik_id: int,
-    icerik_adi: str,
+def gecerli_aktif_madde_mi(icerik_adi: str, dogrulanmis_mi: bool) -> bool:
+    """
+    Barkod taramasından gelen kirli INCI verilerini filtreler.
+    Renk kodları, ağırlık/hacim birimleri ve aşırı kısa isimleri eler.
+    """
+    isim = icerik_adi.strip().upper()
+    
+    # 1. Aşırı kısa (muhtemelen anlamsız) isimler
+    if len(isim) < 3:
+        return False
+        
+    # 2. Sadece sayılar veya sayılar+noktalama
+    if re.fullmatch(r'[0-9\.\-\s]+', isim):
+        return False
+        
+    # 3. Renk kodları (CI 77499, CI 77492 vb.)
+    if isim.startswith("CI ") or re.match(r'^CI\d+', isim):
+        return False
+        
+    # 4. Ağırlık/Hacim birimleri
+    hacim_birimleri = ["ML", "GR", "GRAM", "LITRE", "LITER", "OZ", "KILO", "KG"]
+    for kelime in isim.split():
+        temiz_kelime = re.sub(r'[^A-Z]', '', kelime)
+        if temiz_kelime in hacim_birimleri:
+            return False
+            
+    # 5. Doğrulanmamış şüpheli kelimeler
+    if not dogrulanmis_mi:
+        if "WATER" in isim and len(isim.split()) > 4:
+            return False
+            
+    return True
+
+def konsolide_oneri_al(
+    gecerli_icerikler: list,
     cilt_sorunlari: list,
 ) -> Optional[dict]:
     """
-    Tek bir içerik için cilt sorunlarıyla uyumluluk değerlendirmesi ve rutin önerisi.
-    Uygun değilse None döner. Uygunsa {"oneri": str, "program": {gunler, zaman_dilimi}} döner.
+    Tüm geçerli aktif maddeleri tek bir çağrıda değerlendirir ve tek bir öneri döndürür.
     """
+    if not gecerli_icerikler or not cilt_sorunlari:
+        return None
+        
     client = OpenAI(api_key=api_key)
     sorunlar_str = ", ".join(cilt_sorunlari)
+    icerikler_str = ", ".join(gecerli_icerikler)
 
     prompt = f"""Sen uzman bir kozmetik kimyageri ve cilt bakım formülatörüsünsün.
 
-İncelenen içerik: {icerik_adi}
+Kullanıcının rutinine/analize eklediği geçerli içerikler: {icerikler_str}
 Kullanıcının cilt sorunları: {sorunlar_str}
 
 GEÇERLİ GÜNLER (SADECE bunlardan seç): {GECERLI_GUNLER}
 GEÇERLİ ZAMAN DİLİMLERİ (SADECE bunlardan seç): {GECERLI_ZAMANLAR}
 
-Bu içerik kullanıcının cilt sorunlarından EN AZ BİRİNE uygunsa, kısa öneri ve program üret.
+Bu içerikler (birlikte düşünüldüğünde) kullanıcının cilt sorunlarından EN AZ BİRİNE uygunsa, TEK BİR kısa genel öneri ve program üret.
 Uygun değilse "uygun": false döndür.
 
+SADECE TÜRKÇE YANIT VER. Yabancı dilde veya ham bir metin döndürme.
 JSON formatında yanıt ver. Başka hiçbir şey yazma, sadece JSON:
 
 {{
   "uygun": true,
-  "oneri": "<2-3 cümle kısa öneri veya null>",
+  "oneri": "<2-3 cümle kısa, tutarlı Türkçe öneri>",
   "program": {{
     "gunler": ["<gün listesi>"],
     "zaman_dilimi": "<zaman dilimi>"
@@ -392,12 +433,11 @@ JSON formatında yanıt ver. Başka hiçbir şey yazma, sadece JSON:
 }}
 
 KURALLAR:
-- Aktif/eksfoliyan içerikler (retinol, AHA, BHA, C vitamini, glikolik asit vb.) → Akşam veya Gece, az sayıda gün.
-- Nemlendirici/yatıştırıcı içerikler (hyalüronik asit, seramid, niasinamid, panthenol vb.) → Sabah veya Gece, daha sık.
+- Aktif/eksfoliyan içerikler varsa → Akşam veya Gece, az sayıda gün.
 - Günler SADECE geçerli listeden. Dozaj/yüzde/hafta sayısı ÜRETME.
 - ❗ SAYISAL SIKLIK YASAĞI: oneri metninde "haftada X kez", "X günde bir" gibi ifade GEÇMESİN.
-  Günlere atıfta bulunmak istersen SADECE "belirlenen program günlerinde" ifadesini kullan.
-- Kullanıcının sorunu için gerçekten faydalı değilse uygun: false döndür."""
+- SADECE TÜRKÇE konuş.
+- Tüm içeriklerin genel bir özeti olarak tavsiye ver, tek tek uzun açıklamalar yapma."""
 
     try:
         response = client.chat.completions.create(
@@ -422,7 +462,7 @@ KURALLAR:
         return {"oneri": sonuc.get("oneri", ""), "program": program}
 
     except Exception as e:
-        print(f"tekli_oneri_al hata [{icerik_adi}]: {e}")
+        print(f"konsolide_oneri_al hata: {e}")
         return None
 
 def puan_bazli_sirala(oneriler: list, db: Session, kullanici_id: int) -> list:
@@ -551,7 +591,8 @@ def icerikleri_ara(
             "hamilelikte_guvenli_mi": i.hamilelikte_guvenli_mi,
             "dogrulanmis_mi": i.dogrulanmis_mi,
             "komedojenite_puani": i.komedojenite_puani,
-            "renk": renk
+            "renk": renk,
+            "kullanim_talimati": i.kullanim_talimati
         })
         
     yeni_rozet = None
@@ -841,24 +882,23 @@ def analiz_yap(istek: AnalizIstek, db: Session = Depends(get_db)):
     tekli_oneriler = []
 
     if cilt_sorunlari:
+        gecerli_icerikler = []
         for i_id in tekil_icerik_idler:
-            sonuc = tekli_oneri_al(
-                icerik_id=i_id,
-                icerik_adi=icerik_adi_map[i_id],
-                cilt_sorunlari=cilt_sorunlari,
-            )
+            icerik_obj = icerik_map[i_id]
+            if gecerli_aktif_madde_mi(icerik_obj.icerik_adi, icerik_obj.dogrulanmis_mi):
+                gecerli_icerikler.append(icerik_obj.icerik_adi)
+                
+        if gecerli_icerikler:
+            sonuc = konsolide_oneri_al(gecerli_icerikler, cilt_sorunlari)
             if sonuc:
                 tekli_oneriler.append({
-                    "icerik_id": i_id,
-                    "icerik_adi": icerik_adi_map[i_id],
-                    "renk": renk_map[i_id],
+                    "icerik_id": -1,
+                    "icerik_adi": "Genel Cilt Bakım Önerisi",
+                    "renk": "gray",
                     "uygun": True,
                     "oneri": sonuc.get("oneri"),
                     "program": sonuc.get("program")
                 })
-
-        if istek.kullanici_id:
-            tekli_oneriler = puan_bazli_sirala(tekli_oneriler, db, istek.kullanici_id)
 
     # ─ Geçmişe kaydet (kullanici_id varsa) ─
     if istek.kullanici_id:
@@ -922,6 +962,7 @@ def rutin_olustur(istek: RutinOlustur, db: Session = Depends(get_db)):
     yeni = Rutin(
         kullanici_id=istek.kullanici_id,
         icerik_id=istek.icerik_id,
+        serbest_urun_adi=istek.serbest_urun_adi,
         gunler=gecerli_gunler,
         zaman_dilimi=istek.zaman_dilimi,
         aktif=True,
@@ -1031,6 +1072,42 @@ def manuel_rutin_ekle(istek: ManuelRutinEkleIstek, db: Session = Depends(get_db)
         "yeni_rozet_kazanildi": yeni_rozet
     }
 
+@app.post("/rutinler/serbest-ekle")
+def serbest_rutin_ekle(istek: ManuelSerbestEkleIstek, db: Session = Depends(get_db)):
+    """Kullanıcının kendi girdiği analiz kapsamı dışındaki serbest ürünleri rutine ekler."""
+    gecerli_gunler = [g for g in istek.gunler if g in GECERLI_GUNLER]
+    if not gecerli_gunler:
+        raise HTTPException(status_code=400, detail="Geçerli gün belirtilmedi.")
+    if istek.zaman_dilimi not in GECERLI_ZAMANLAR:
+        raise HTTPException(status_code=400, detail="Geçerli bir zaman dilimi seçin.")
+
+    yeni = Rutin(
+        kullanici_id=istek.kullanici_id,
+        icerik_id=None,
+        serbest_urun_adi=istek.serbest_urun_adi,
+        kapsam_disi=True,
+        gunler=gecerli_gunler,
+        zaman_dilimi=istek.zaman_dilimi,
+        aktif=True
+    )
+    db.add(yeni)
+    db.commit()
+    db.refresh(yeni)
+
+    yeni_rozet = rozet_kontrol_ve_ver(istek.kullanici_id, "ilk_adim", db)
+
+    return {
+        "uyari": False,
+        "rutin_id": yeni.rutin_id,
+        "icerik_id": None,
+        "serbest_urun_adi": yeni.serbest_urun_adi,
+        "kapsam_disi": True,
+        "gunler": yeni.gunler,
+        "zaman_dilimi": yeni.zaman_dilimi,
+        "aktif": yeni.aktif,
+        "yeni_rozet_kazanildi": yeni_rozet
+    }
+
 @app.get("/rutin/{kullanici_id}")
 def rutin_getir(kullanici_id: int, db: Session = Depends(get_db)):
     """Kullanıcının aktif rutinlerini içerik adlarıyla birlikte döner."""
@@ -1043,14 +1120,23 @@ def rutin_getir(kullanici_id: int, db: Session = Depends(get_db)):
 
     sonuc = []
     for rutin in rutinler:
-        icerik = db.query(Icerik).filter(Icerik.icerik_id == rutin.icerik_id).first()
+        if rutin.kapsam_disi:
+            icerik_adi = rutin.serbest_urun_adi
+            kullanim_talimati = None
+        else:
+            icerik = db.query(Icerik).filter(Icerik.icerik_id == rutin.icerik_id).first()
+            icerik_adi = icerik.icerik_adi if icerik else f"İçerik #{rutin.icerik_id}"
+            kullanim_talimati = icerik.kullanim_talimati if icerik else None
+
         sonuc.append({
             "rutin_id": rutin.rutin_id,
             "icerik_id": rutin.icerik_id,
-            "icerik_adi": icerik.icerik_adi if icerik else f"İçerik #{rutin.icerik_id}",
+            "icerik_adi": icerik_adi,
+            "kapsam_disi": rutin.kapsam_disi,
             "gunler": rutin.gunler,
             "zaman_dilimi": rutin.zaman_dilimi,
             "olusturma_tarihi": rutin.olusturma_tarihi.isoformat() if rutin.olusturma_tarihi else None,
+            "kullanim_talimati": kullanim_talimati
         })
 
     return sonuc
@@ -1413,11 +1499,72 @@ def hesapla_rutin_saglik_skoru(icerik_idler, db):
         'detaylar': detaylar
     }
 
+def hesapla_skor_streak(kullanici_id: int, db: Session) -> int:
+    from datetime import datetime, timedelta
+    rutinler = db.query(Rutin).filter(Rutin.kullanici_id == kullanici_id).all()
+    if not rutinler:
+        return 0
+    
+    rutin_map = {r.rutin_id: r.icerik_id for r in rutinler}
+    kayitlar = db.query(RutinKaydi).filter(RutinKaydi.rutin_id.in_(rutin_map.keys())).all()
+    
+    gunluk_icerikler = {}
+    for k in kayitlar:
+        if k.tarih not in gunluk_icerikler:
+            gunluk_icerikler[k.tarih] = []
+        gunluk_icerikler[k.tarih].append(rutin_map[k.rutin_id])
+        
+    tarih_seti = set(gunluk_icerikler.keys())
+    if not tarih_seti:
+        return 0
+        
+    bugun = datetime.now().date()
+    kontrol = bugun
+    
+    if kontrol not in tarih_seti:
+        if (kontrol - timedelta(days=1)) in tarih_seti:
+            kontrol -= timedelta(days=1)
+        else:
+            return 0
+            
+    streak = 0
+    while kontrol in tarih_seti:
+        icerik_idler = gunluk_icerikler[kontrol]
+        sonuc = hesapla_rutin_saglik_skoru(icerik_idler, db)
+        if sonuc["skor"] >= 80:
+            streak += 1
+        else:
+            break
+        kontrol -= timedelta(days=1)
+        
+    return streak
+
 @app.get('/api/routine/health-score/{kullanici_id}')
 def get_routine_health_score(kullanici_id: int, db: Session = Depends(get_db)):
-    rutinler = db.query(Rutin).filter(Rutin.kullanici_id == kullanici_id, Rutin.aktif == True).all()
-    icerik_idler = [r.icerik_id for r in rutinler]
+    rutinler = db.query(Rutin).filter(
+        Rutin.kullanici_id == kullanici_id, 
+        Rutin.aktif == True,
+        Rutin.kapsam_disi == False
+    ).all()
+    icerik_idler = [r.icerik_id for r in rutinler if r.icerik_id is not None]
     sonuc = hesapla_rutin_saglik_skoru(icerik_idler, db)
+
+    # Yeni Rozet Kontrolleri (Haftalık Denge & Aylık Disiplin)
+    skor_streak = hesapla_skor_streak(kullanici_id, db)
+    yeni_rozetler = []
+    
+    if skor_streak >= 7:
+        yeni_rozet = rozet_kontrol_ve_ver(kullanici_id, 'haftalik_denge', db)
+        if yeni_rozet:
+            yeni_rozetler.append(yeni_rozet)
+    
+    if skor_streak >= 30:
+        yeni_rozet = rozet_kontrol_ve_ver(kullanici_id, 'aylik_disiplin', db)
+        if yeni_rozet:
+            yeni_rozetler.append(yeni_rozet)
+    
+    if yeni_rozetler:
+        sonuc["yeni_rozetler"] = yeni_rozetler
 
     # Hash the sorted ingredient IDs
     sorted_icerikler = sorted(list(set(icerik_idler)))
@@ -1432,7 +1579,7 @@ def get_routine_health_score(kullanici_id: int, db: Session = Depends(get_db)):
 
     if cache_entry:
         sonuc["llm_aciklama"] = cache_entry.aciklama_metni
-        sonuc["genel_uyari"] = "Bu bilgiler AI destekli analiz sonucudur, bilgilendirme amaçlıdır ve tıbbi tavsiye yerine geçmez. Kesin karar için dermatoloğunuza danışınız."
+        sonuc["genel_uyari"] = "AI tavsiyeleri tıbbi nitelik taşımaz."
         return sonuc
 
     # Prepare static fallback text
@@ -1459,7 +1606,7 @@ def get_routine_health_score(kullanici_id: int, db: Session = Depends(get_db)):
 
         client = OpenAI(api_key=openai_key)
         
-        system_prompt = "Sen bir cilt bakımı asistanısın. Kullanıcının rutinindeki ürün etkileşimlerini (çakışma/sinerji) sana verilen teknik açıklamalardan yola çıkarak, samimi ve anlaşılır bir Türkçe ile 2-3 cümlede özetle. Teknik terimleri koru (retinol, AHA/BHA gibi) ama cümle akışını sohbet diline çevir. Yeni bir tıbbi iddia UYDURMA, sadece verilen bilgiyi yeniden ifade et."
+        system_prompt = "Sen bir dermatoloğun asistanısın. Kullanıcının günlük rutinini inceliyorsun. Sadece 2-3 cümlelik, çok KISA, özet bir tavsiye ver. Kesinlikle tıbbi tavsiye yerine geçmez, doktora danışın gibi uyarılar EKLEME, bunu biz UI'da sabit yazacağız. Nazik ve motive edici ol."
         user_prompt = "Rutin detaylarım:\n"
         for d in sonuc["detaylar"]:
             user_prompt += f"- {d['tip'].capitalize()}: {d['icerik_1']} ve {d['icerik_2']}. (Risk: {d.get('severity', 'yok')})\n"
@@ -1492,5 +1639,70 @@ def get_routine_health_score(kullanici_id: int, db: Session = Depends(get_db)):
         print("LLM Error:", e)
         sonuc["llm_aciklama"] = fallback_metin
 
-    sonuc["genel_uyari"] = "Bu bilgiler AI destekli analiz sonucudur, bilgilendirme amaçlıdır ve tıbbi tavsiye yerine geçmez. Kesin karar için dermatoloğunuza danışınız."
+    sonuc["genel_uyari"] = "AI tavsiyeleri tıbbi nitelik taşımaz."
     return sonuc
+
+@app.get("/kullanicilar/{kullanici_id}/haftalik-sadakat")
+def haftalik_sadakat(kullanici_id: int, db: Session = Depends(get_db)):
+    from datetime import date, timedelta
+    
+    bugun = date.today()
+    pazartesi = bugun - timedelta(days=bugun.weekday())
+    
+    # Kullanıcının aktif olan tüm rutinleri (kapsam_disi dahil)
+    rutinler = db.query(Rutin).filter(
+        Rutin.kullanici_id == kullanici_id,
+        Rutin.aktif == True
+    ).all()
+    
+    if not rutinler:
+        return {"yuzde": 0, "toplam_beklenen": 0, "toplam_tamamlanan": 0, "mesaj": "Henüz veri yok"}
+        
+    rutin_idler = [r.rutin_id for r in rutinler]
+    
+    # Bu haftanın rutin kayıtları
+    kayitlar = db.query(RutinKaydi).filter(
+        RutinKaydi.rutin_id.in_(rutin_idler),
+        RutinKaydi.tarih >= pazartesi,
+        RutinKaydi.tarih <= bugun
+    ).all()
+    
+    # Hızlı arama için dict
+    tamamlanan_dict = {}
+    for k in kayitlar:
+        tamamlanan_dict[(k.rutin_id, k.tarih)] = True
+
+    toplam_beklenen = 0
+    toplam_tamamlanan = 0
+    
+    for i in range((bugun - pazartesi).days + 1):
+        gun_tarih = pazartesi + timedelta(days=i)
+        gun_adi = GECERLI_GUNLER[gun_tarih.weekday()]
+        
+        for r in rutinler:
+            # Sadece ilgili günde yapılması gereken ve o gün / daha öncesinde oluşturulmuş rutinleri say
+            olusturma_date = r.olusturma_tarihi.date() if r.olusturma_tarihi else date.min
+            if gun_adi in r.gunler and olusturma_date <= gun_tarih:
+                toplam_beklenen += 1
+                if (r.rutin_id, gun_tarih) in tamamlanan_dict:
+                    toplam_tamamlanan += 1
+                    
+    if toplam_beklenen == 0:
+        return {"yuzde": 0, "toplam_beklenen": 0, "toplam_tamamlanan": 0, "mesaj": "Henüz veri yok"}
+        
+    yuzde = int((toplam_tamamlanan / toplam_beklenen) * 100)
+    yuzde = min(100, max(0, yuzde))
+    
+    if yuzde >= 80:
+        mesaj = "Harikasın, bu hafta çok disiplinlisin! 🌟"
+    elif yuzde >= 50:
+        mesaj = "İyi gidiyorsun, devam et!"
+    else:
+        mesaj = "İvme kazanabilirsin, bugün bir adım at! 💪"
+        
+    return {
+        "yuzde": yuzde,
+        "toplam_beklenen": toplam_beklenen,
+        "toplam_tamamlanan": toplam_tamamlanan,
+        "mesaj": mesaj
+    }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, StyleSheet, View, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, Platform } from 'react-native';
+import { Modal, StyleSheet, View, TouchableOpacity, ActivityIndicator, SafeAreaView, Platform } from 'react-native';
+import { CustomAlert as Alert } from '@/components/OzelAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from './themed-text';
@@ -52,8 +53,10 @@ export function BarkodTarayiciModal({ visible, onClose, onProductFound }: Barkod
 
       const result = await response.json();
 
-      if (result.yeni_rozet_kazanildi) {
-        DeviceEventEmitter.emit('yeni_rozet', result.yeni_rozet_kazanildi);
+      if (result.yeni_rozetler && result.yeni_rozetler.length > 0) {
+        DeviceEventEmitter.emit('yeni_rozet_kuyrugu', result.yeni_rozetler);
+      } else if (result.yeni_rozet_kazanildi) {
+        DeviceEventEmitter.emit('yeni_rozet_kuyrugu', [result.yeni_rozet_kazanildi]);
       }
 
       if (result.bulundu) {

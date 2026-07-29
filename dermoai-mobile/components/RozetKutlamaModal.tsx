@@ -9,14 +9,27 @@ export function RozetKutlamaModal() {
   const colorScheme = useColorScheme();
   const renkler = Colors[colorScheme ?? 'light'];
   
-  const [rozet, setRozet] = useState<any>(null);
+  const [rozetKuyrugu, setRozetKuyrugu] = useState<any[]>([]);
+  const [aktifRozet, setAktifRozet] = useState<any>(null);
   const [visible, setVisible] = useState(false);
   const scale = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('yeni_rozet', (yeniRozet) => {
-      setRozet(yeniRozet);
+    const subscription = DeviceEventEmitter.addListener('yeni_rozet_kuyrugu', (yeniRozetler) => {
+      setRozetKuyrugu(prev => [...prev, ...yeniRozetler]);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!aktifRozet && rozetKuyrugu.length > 0) {
+      setAktifRozet(rozetKuyrugu[0]);
+      setRozetKuyrugu(prev => prev.slice(1));
       setVisible(true);
+      scale.setValue(0);
       
       Animated.sequence([
         Animated.timing(scale, {
@@ -31,16 +44,27 @@ export function RozetKutlamaModal() {
           useNativeDriver: true,
         })
       ]).start();
-      
-      setTimeout(() => setVisible(false), 4000); // Otomatik kapat
-    });
+    }
+  }, [rozetKuyrugu, aktifRozet, scale]);
 
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (visible && aktifRozet) {
+      timer = setTimeout(() => modalKapat(), 4000);
+    }
     return () => {
-      subscription.remove();
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [visible, aktifRozet]);
 
-  if (!visible || !rozet) return null;
+  const modalKapat = () => {
+    setVisible(false);
+    setTimeout(() => {
+      setAktifRozet(null);
+    }, 300); // Fade animasyonu için süre tanı
+  };
+
+  if (!visible || !aktifRozet) return null;
 
   return (
     <Modal visible={visible} transparent animationType="fade">
@@ -48,16 +72,16 @@ export function RozetKutlamaModal() {
         <View style={[styles.container, { backgroundColor: renkler.background, borderColor: renkler.tint }]}>
           <ThemedText type="subtitle" style={styles.title}>Tebrikler! 🎉</ThemedText>
           <Animated.Text style={[styles.emoji, { transform: [{ scale }] }]}>
-            {rozet.emoji}
+            {aktifRozet.emoji}
           </Animated.Text>
           <ThemedText type="defaultSemiBold" style={[styles.rozetAdi, { color: renkler.tint }]}>
-            {rozet.rozet_adi} Rozeti Kazandın!
+            {aktifRozet.rozet_adi} Rozeti Kazandın!
           </ThemedText>
-          <ThemedText style={styles.aciklama}>{rozet.aciklama}</ThemedText>
+          <ThemedText style={styles.aciklama}>{aktifRozet.aciklama}</ThemedText>
           
           <TouchableOpacity 
             style={[styles.button, { backgroundColor: renkler.tint }]}
-            onPress={() => setVisible(false)}
+            onPress={modalKapat}
           >
             <Text style={styles.buttonText}>Harika!</Text>
           </TouchableOpacity>

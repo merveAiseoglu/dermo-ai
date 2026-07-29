@@ -9,6 +9,7 @@ import { useKullanici } from '@/hooks/use-kullanici';
 import { TurProvider } from '@/hooks/TurContext';
 import { TurOverlay } from '@/components/TurOverlay';
 import { RozetKutlamaModal } from '@/components/RozetKutlamaModal';
+import { OzelAlertRoot } from '@/components/OzelAlert';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -32,6 +33,7 @@ function RootNavigator() {
         </Stack>
         <TurOverlay />
         <RozetKutlamaModal />
+        <OzelAlertRoot />
       </TurProvider>
       <StatusBar style="auto" />
     </ThemeProvider>

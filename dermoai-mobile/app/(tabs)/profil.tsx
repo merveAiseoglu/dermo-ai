@@ -12,7 +12,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -26,6 +25,8 @@ import {
   Image,
   DeviceEventEmitter,
 } from "react-native";
+import { Repeat, MoreVertical, Sun, Moon, Sparkles, CalendarClock, Check } from "lucide-react-native";
+import Svg, { Circle } from "react-native-svg";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -33,37 +34,42 @@ import { ManuelRutinEkleModal } from "@/components/ManuelRutinEkleModal";
 import { BitkiKarakteri } from "@/components/BitkiKarakteri";
 import { Colors } from "@/constants/theme";
 import { useThemeContext } from "@/hooks/ThemeProvider";
+import { CustomAlert as Alert } from "@/components/OzelAlert";
 import { API_URL } from "@/hooks/use-kullanici";
 import { bildirimIptalEt, hijyenBildirimiKur, hijyenBildirimiIptalEt, izinIste } from "@/hooks/use-notifications";
 
 const HIJYEN_HATIRLATICILARI = [
   {
     id: "gunes_kremi",
-    baslik: "☀️ Güneş Kremi Yenileme",
-    mesaj: "Güneş kreminizi tekrar sürmeyi unutmayın",
+    baslik: "Güneş Kremi Yenileme",
+    mesaj: "Cilt perin hatırlatıyor: Güneş kremini tazeleme vakti geldi!",
+    ikon: "Sun",
     sıklık: "günde 3 kez",
     saatler: [10, 13, 16],
   },
   {
     id: "yastik_kilifi",
-    baslik: "🛏️ Yastık Kılıfı Değişimi",
-    mesaj: "Cilt sağlığınız için yastık kılıfınızı değiştirmeyi unutmayın",
+    baslik: "Yastık Kılıfı Değişimi",
+    mesaj: "Cilt perin: Yastık kılıfını değiştirmenin tam zamanı, cildin teşekkür edecek",
+    ikon: "Moon",
     sıklık: "haftalık",
     gun: "Pazar",
     saat: 20,
   },
   {
     id: "makyaj_fircasi",
-    baslik: "🖌️ Makyaj Fırçası/Sünger Temizliği",
-    mesaj: "Fırça ve süngerlerinizi temizlemeyi unutmayın",
+    baslik: "Makyaj Fırçası/Sünger Temizliği",
+    mesaj: "Cilt perin fısıldıyor: Fırçaların temizlenmek istiyor, sivilcelerden korunalım!",
+    ikon: "Sparkles",
     sıklık: "haftalık",
     gun: "Cumartesi",
     saat: 19,
   },
   {
     id: "urun_skt",
-    baslik: "📅 Ürün Son Kullanma Tarihi Kontrolü",
-    mesaj: "Açık kutu ürünlerinizin son kullanma tarihlerini kontrol edin",
+    baslik: "Ürün Son Kullanma Tarihi Kontrolü",
+    mesaj: "Cilt perin uyarıyor: Ürünlerinin ömrünü kontrol et, tazeliğini koru!",
+    ikon: "CalendarClock",
     sıklık: "aylık",
     ayin_gunu: 1,
     saat: 18,
@@ -98,6 +104,8 @@ interface RutinKaydi {
   icerik_adi: string;
   gunler: string[];
   zaman_dilimi: string;
+  kullanim_talimati?: string | null;
+  kapsam_disi?: boolean;
 }
 
 export default function ProfilScreen() {
@@ -123,6 +131,8 @@ export default function ProfilScreen() {
   // Rozetler
   const [rozetler, setRozetler] = useState<any[]>([]);
 
+  const [healthScore, setHealthScore] = useState<number | null>(null);
+
   // Düzenleme alanları
   const [duzenIsim, setDuzenIsim] = useState("");
   const [duzenCiltTipi, setDuzenCiltTipi] = useState<string | null>(null);
@@ -135,8 +145,10 @@ export default function ProfilScreen() {
     setYukleniyor(true);
     try {
       const cihazId = await AsyncStorage.getItem("cihaz_id");
+      console.log("[GUARD] cihazId:", cihazId);
       if (!cihazId) return;
 
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanici/cihaz/${cihazId}`);
       const yanit = await fetch(`${API_URL}/kullanici/cihaz/${cihazId}`);
       if (!yanit.ok) return;
 
@@ -145,6 +157,15 @@ export default function ProfilScreen() {
 
       rutinleriCek(veri.kullanici_id);
 
+      try {
+        console.log("[API] İstek gönderiliyor:", `${API_URL}/api/routine/health-score/${veri.kullanici_id}`);
+        const hsYanit = await fetch(`${API_URL}/api/routine/health-score/${veri.kullanici_id}`);
+        if (hsYanit.ok) {
+          const hsVeri = await hsYanit.json();
+          setHealthScore(hsVeri.skor);
+        }
+      } catch (e) { console.error(e); }
+
       // Streak verisini çek
       const d = new Date();
       const yyyy = d.getFullYear();
@@ -152,16 +173,20 @@ export default function ProfilScreen() {
       const dd = String(d.getDate()).padStart(2, '0');
       const localTarih = `${yyyy}-${mm}-${dd}`;
       
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/streak/${veri.kullanici_id}?tarih=${localTarih}`);
       const sYanit = await fetch(`${API_URL}/streak/${veri.kullanici_id}?tarih=${localTarih}`);
       if (sYanit.ok) {
         const sData = await sYanit.json();
         setStreakGunSayisi(sData.streak_gun_sayisi || 0);
-        if (sData.yeni_rozet_kazanildi) {
-          DeviceEventEmitter.emit('yeni_rozet', sData.yeni_rozet_kazanildi);
+        if (sData.yeni_rozetler && sData.yeni_rozetler.length > 0) {
+          DeviceEventEmitter.emit('yeni_rozet_kuyrugu', sData.yeni_rozetler);
+        } else if (sData.yeni_rozet_kazanildi) {
+          DeviceEventEmitter.emit('yeni_rozet_kuyrugu', [sData.yeni_rozet_kazanildi]);
         }
       }
 
       // Rozetleri çek
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanicilar/${veri.kullanici_id}/rozetler`);
       const rYanit = await fetch(`${API_URL}/kullanicilar/${veri.kullanici_id}/rozetler`);
       if (rYanit.ok) {
         const rData = await rYanit.json();
@@ -185,6 +210,7 @@ export default function ProfilScreen() {
   const rutinleriCek = async (kullaniciId: number) => {
     setRutinYukleniyor(true);
     try {
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin/${kullaniciId}`);
       const yanit = await fetch(`${API_URL}/rutin/${kullaniciId}`);
       if (!yanit.ok) return;
       const veri: RutinKaydi[] = await yanit.json();
@@ -247,6 +273,10 @@ export default function ProfilScreen() {
     }
 
     setKaydediliyor(true);
+    console.log("[GUARD] kullanici:", kullanici);
+    if (!kullanici) return;
+
+    console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanici/${kullanici.kullanici_id}`);
     try {
       const yanit = await fetch(
         `${API_URL}/kullanici/${kullanici.kullanici_id}`,
@@ -305,6 +335,7 @@ export default function ProfilScreen() {
           style: "destructive",
           onPress: async () => {
             try {
+              console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin/${rutin.rutin_id}`);
               await fetch(`${API_URL}/rutin/${rutin.rutin_id}`, { method: "DELETE" });
               await bildirimIptalEt(rutin.rutin_id);
               setRutinler((prev) => prev.filter((r) => r.rutin_id !== rutin.rutin_id));
@@ -328,14 +359,16 @@ export default function ProfilScreen() {
       let eskiStreak = 0;
       if (kullanici) {
         try {
+          console.log("[API] İstek gönderiliyor:", `${API_URL}/streak/${kullanici.kullanici_id}?tarih=${localTarih}`);
           const sYanit = await fetch(`${API_URL}/streak/${kullanici.kullanici_id}?tarih=${localTarih}`);
           if (sYanit.ok) {
             const data = await sYanit.json();
             eskiStreak = data.streak_gun_sayisi || 0;
           }
-        } catch (e) {}
+        } catch (e) { console.error(e); }
       }
 
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/rutin-kayit`);
       const yanit = await fetch(`${API_URL}/rutin-kayit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -347,6 +380,7 @@ export default function ProfilScreen() {
         
         if (kullanici) {
           try {
+            console.log("[API] İstek gönderiliyor:", `${API_URL}/streak/${kullanici.kullanici_id}?tarih=${localTarih}`);
             const sYanit2 = await fetch(`${API_URL}/streak/${kullanici.kullanici_id}?tarih=${localTarih}`);
             if (sYanit2.ok) {
               const data2 = await sYanit2.json();
@@ -358,16 +392,20 @@ export default function ProfilScreen() {
                 setTimeout(() => setStreakKutlama(false), 3000);
               }
               
-              if (data2.yeni_rozet_kazanildi) {
-                DeviceEventEmitter.emit('yeni_rozet', data2.yeni_rozet_kazanildi);
-                // Rozetleri yenile
-                fetch(`${API_URL}/kullanicilar/${kullanici.kullanici_id}/rozetler`)
-                  .then(r => r.json())
-                  .then(data => setRozetler(data))
-                  .catch(() => {});
-              }
+              if (data2.yeni_rozetler && data2.yeni_rozetler.length > 0) {
+                DeviceEventEmitter.emit('yeni_rozet_kuyrugu', data2.yeni_rozetler);
+              } else if (data2.yeni_rozet_kazanildi) {
+                DeviceEventEmitter.emit('yeni_rozet_kuyrugu', [data2.yeni_rozet_kazanildi]);
+              } 
+              
+              // Rozetleri yenile
+              console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanicilar/${kullanici.kullanici_id}/rozetler`);
+              fetch(`${API_URL}/kullanicilar/${kullanici.kullanici_id}/rozetler`)
+                .then(r => r.json())
+                .then(data => setRozetler(data))
+                .catch(() => {});
             }
-          } catch (e) {}
+          } catch (e) { console.error(e); }
         }
       }
     } catch(e) {
@@ -438,13 +476,61 @@ export default function ProfilScreen() {
             {/* ── GÖRÜNTÜLEME MODU ── */}
             {!duzenlemeAktif && kullanici && (
               <View style={styles.bilgiBolumu}>
-                <BilgiKarti
-                  baslik="Cilt Tipi"
-                  ikon="water"
-                  deger={kullanici.cilt_tipi ?? "Belirtilmemiş"}
-                  renkler={renkler}
-                />
-                
+                <View style={[styles.bilgiKart, { backgroundColor: renkler.surface, borderColor: renkler.border, padding: 20, flexDirection: 'column', gap: 16 }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                      <ThemedText style={{ fontSize: 12, textTransform: 'uppercase', color: renkler.icon, letterSpacing: 0.5, marginBottom: 4 }}>
+                        Cilt Tipi
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 20, fontWeight: '600', color: renkler.text }}>
+                        {kullanici.cilt_tipi ?? "Belirtilmemiş"}
+                      </ThemedText>
+                    </View>
+                    
+                    <View style={{ width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }}>
+                      <Svg width="40" height="40" viewBox="0 0 40 40">
+                        <Circle cx="20" cy="20" r="18" stroke={renkler.border} strokeWidth="4" fill="none" />
+                        <Circle 
+                          cx="20" cy="20" r="18" 
+                          stroke={renkler.tint} 
+                          strokeWidth="4" 
+                          fill="none" 
+                          strokeDasharray="113.097"
+                          strokeDashoffset={113.097 - (113.097 * (healthScore ?? 0)) / 100}
+                          strokeLinecap="round"
+                          transform="rotate(-90 20 20)"
+                        />
+                      </Svg>
+                      <ThemedText style={{ position: 'absolute', fontSize: 14, fontWeight: '700', color: renkler.text }}>
+                        {healthScore ?? 0}
+                      </ThemedText>
+                    </View>
+                  </View>
+                  
+                  <View style={{ height: 1, backgroundColor: 'rgba(0,0,0,0.06)' }} />
+                  
+                  <View>
+                    <ThemedText style={{ fontSize: 12, textTransform: 'uppercase', color: renkler.icon, letterSpacing: 0.5, marginBottom: 8 }}>
+                      Cilt Sorunları
+                    </ThemedText>
+                    {kullanici.cilt_sorunlari && kullanici.cilt_sorunlari.length > 0 ? (
+                      <View style={styles.etiketler}>
+                        {kullanici.cilt_sorunlari.map((sorun) => (
+                          <View key={sorun} style={[styles.etiket, { backgroundColor: renkler.primaryLight }]}>
+                            <ThemedText style={[styles.etiketYazi, { color: renkler.tint }]}>
+                              {sorun}
+                            </ThemedText>
+                          </View>
+                        ))}
+                      </View>
+                    ) : (
+                      <ThemedText style={{ color: renkler.icon, fontSize: 14 }}>
+                        Belirtilmemiş
+                      </ThemedText>
+                    )}
+                  </View>
+                </View>
+
                 {kullanici.hamilelik_modu_aktif && (
                   <BilgiKarti
                     baslik="Hamilelik Modu"
@@ -453,48 +539,6 @@ export default function ProfilScreen() {
                     renkler={renkler}
                   />
                 )}
-                
-                <View
-                  style={[
-                    styles.bilgiKart,
-                    {
-                      backgroundColor: renkler.surface,
-                      borderColor: renkler.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.bilgiKartUst}>
-                    <Ionicons name="sparkles" size={16} color={renkler.tint} />
-                    <ThemedText
-                      style={[styles.bilgiBaslik, { color: renkler.icon }]}
-                    >
-                      Cilt Sorunları
-                    </ThemedText>
-                  </View>
-                  {kullanici.cilt_sorunlari && kullanici.cilt_sorunlari.length > 0 ? (
-                    <View style={styles.etiketler}>
-                      {kullanici.cilt_sorunlari.map((sorun) => (
-                        <View
-                          key={sorun}
-                          style={[
-                            styles.etiket,
-                            { backgroundColor: renkler.primaryLight },
-                          ]}
-                        >
-                          <ThemedText
-                            style={[styles.etiketYazi, { color: renkler.tint }]}
-                          >
-                            {sorun}
-                          </ThemedText>
-                        </View>
-                      ))}
-                    </View>
-                  ) : (
-                    <ThemedText style={{ color: renkler.icon, fontSize: 14 }}>
-                      Belirtilmemiş
-                    </ThemedText>
-                  )}
-                </View>
               </View>
             )}
 
@@ -690,55 +734,71 @@ export default function ProfilScreen() {
               )}
 
               {!rutinYukleniyor &&
-                rutinler.map((rutin) => (
-                  <View
-                    key={rutin.rutin_id}
-                    style={[
-                      styles.rutinKart,
-                      { backgroundColor: renkler.surface, borderColor: renkler.border },
-                    ]}
-                  >
-                    <View style={styles.rutinKartSol}>
-                      <ThemedText type="defaultSemiBold" style={styles.rutinIcerikAdi}>
-                        {rutin.icerik_adi}
-                      </ThemedText>
-                      <ThemedText style={[styles.rutinDetay, { color: renkler.icon }]}>
-                        {rutin.gunler.join(", ")} • {rutin.zaman_dilimi}
-                      </ThemedText>
-                    </View>
-                    <View style={{ gap: 8, alignItems: 'flex-end' }}>
-                      <TouchableOpacity
-                        onPress={() => rutinIsaretle(rutin.rutin_id)}
-                        disabled={isaretlenenRutinler.has(rutin.rutin_id)}
-                        activeOpacity={0.7}
-                        style={[
-                          styles.rutinKaldirButon, 
-                          { 
-                            borderColor: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.success : renkler.tint,
-                            backgroundColor: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.successLight : 'transparent'
-                          }
-                        ]}
-                      >
-                        <ThemedText 
+                rutinler.map((rutin) => {
+                  const gunMetni = rutin.gunler.length === 7 ? "Her gün" : rutin.gunler.join(", ");
+                  return (
+                    <View
+                      key={rutin.rutin_id}
+                      style={[
+                        styles.rutinKart,
+                        { backgroundColor: renkler.surface, borderColor: renkler.border },
+                      ]}
+                    >
+                      <View style={styles.rutinKartSol}>
+                        <ThemedText type="defaultSemiBold" style={styles.rutinIcerikAdi}>
+                          {rutin.icerik_adi}
+                        </ThemedText>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                          <Repeat size={14} color={renkler.icon} style={{ marginRight: 4 }} />
+                          <ThemedText style={[styles.rutinDetay, { color: renkler.icon, marginTop: 0 }]}>
+                            {gunMetni} • {rutin.zaman_dilimi}
+                          </ThemedText>
+                        </View>
+                        {rutin.kullanim_talimati && (
+                          <ThemedText style={{ fontSize: 12, color: renkler.icon, fontStyle: 'italic', marginTop: 4 }} numberOfLines={2}>
+                            {rutin.kullanim_talimati}
+                          </ThemedText>
+                        )}
+                        {rutin.kapsam_disi && (
+                          <View style={{ backgroundColor: renkler.surface, alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 4, borderWidth: 1, borderColor: renkler.border }}>
+                            <ThemedText style={{ fontSize: 10, color: renkler.icon }}>ℹ️ Analiz kapsamı dışında</ThemedText>
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ gap: 8, alignItems: 'flex-end', justifyContent: 'center' }}>
+                        <TouchableOpacity
+                          onPress={() => Alert.alert("Sil", "Bu rutini silmek istediğine emin misin?", [{text: "İptal", style: "cancel"}, {text: "Sil", style: "destructive", onPress: () => rutinSil(rutin)}])}
+                          activeOpacity={0.7}
+                          style={{ position: 'absolute', top: -8, right: -8, padding: 8 }}
+                        >
+                          <MoreVertical size={20} color={renkler.icon} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => rutinIsaretle(rutin.rutin_id)}
+                          disabled={isaretlenenRutinler.has(rutin.rutin_id)}
+                          activeOpacity={0.7}
                           style={[
-                            styles.rutinKaldirYazi, 
-                            { color: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.success : renkler.tint }
+                            styles.rutinKaldirButon, 
+                            { 
+                              borderColor: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.success : renkler.tint,
+                              backgroundColor: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.successLight : 'transparent',
+                              marginTop: 24
+                            }
                           ]}
                         >
-                          {isaretlenenRutinler.has(rutin.rutin_id) ? "✅ İşaretlendi" : "✓ Bugün Yaptım"}
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => rutinSil(rutin)}
-                        activeOpacity={0.7}
-                      >
-                        <ThemedText style={[styles.rutinKaldirYazi, { color: renkler.danger, fontWeight: '400', fontSize: 11 }]}>
-                          Sil
-                        </ThemedText>
-                      </TouchableOpacity>
+                          <ThemedText 
+                            style={[
+                              styles.rutinKaldirYazi, 
+                              { color: isaretlenenRutinler.has(rutin.rutin_id) ? renkler.success : renkler.tint }
+                            ]}
+                          >
+                            {isaretlenenRutinler.has(rutin.rutin_id) ? "✅ İşaretlendi" : "✓ Bugün Yaptım"}
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
             </View>
           )}
 
@@ -747,42 +807,56 @@ export default function ProfilScreen() {
             <View style={styles.rutinimBolum}>
               <View style={[styles.rutinimBaslikSatir, { justifyContent: 'space-between' }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="water-outline" size={16} color={renkler.tint} />
+                  <Image 
+                    source={require('@/assets/images/karakterler/peri-maskot.png')} 
+                    style={{ width: 28, height: 28 }} 
+                    resizeMode="contain" 
+                  />
                   <ThemedText style={[styles.rutinimBaslik, { color: renkler.text }]}>
                     Cilt Hijyeni Hatırlatıcıları
                   </ThemedText>
                 </View>
-                <Image 
-                  source={require('@/assets/images/karakterler/peri-maskot.png')} 
-                  style={{ width: 40, height: 40 }} 
-                  resizeMode="contain" 
-                />
               </View>
 
-              {HIJYEN_HATIRLATICILARI.map((hijyen) => (
-                <View
-                  key={hijyen.id}
-                  style={[
-                    styles.rutinKart,
-                    { backgroundColor: renkler.surface, borderColor: renkler.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-                  ]}
-                >
-                  <View style={{ flex: 1, paddingRight: 12 }}>
-                    <ThemedText type="defaultSemiBold" style={styles.rutinIcerikAdi}>
-                      {hijyen.baslik}
-                    </ThemedText>
-                    <ThemedText style={[styles.rutinDetay, { color: renkler.icon, marginTop: 4, fontSize: 11 }]}>
-                      {hijyen.mesaj} ({hijyen.sıklık})
-                    </ThemedText>
+              {HIJYEN_HATIRLATICILARI.map((hijyen) => {
+                const IconComponent = 
+                  hijyen.ikon === "Sun" ? Sun : 
+                  hijyen.ikon === "Moon" ? Moon : 
+                  hijyen.ikon === "Sparkles" ? Sparkles : CalendarClock;
+
+                return (
+                  <View
+                    key={hijyen.id}
+                    style={[
+                      styles.rutinKart,
+                      { backgroundColor: renkler.surface, borderColor: renkler.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+                    ]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 40, position: 'relative' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <IconComponent size={20} color={renkler.tint} />
+                        <ThemedText type="defaultSemiBold" style={styles.rutinIcerikAdi}>
+                          {hijyen.baslik}
+                        </ThemedText>
+                      </View>
+                      <ThemedText style={[styles.rutinDetay, { color: renkler.icon, fontSize: 11, marginTop: 0 }]}>
+                        {hijyen.mesaj}
+                      </ThemedText>
+                      <View style={{ position: 'absolute', top: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.05)', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 12 }}>
+                        <ThemedText style={{ fontSize: 10, textTransform: 'uppercase', color: renkler.icon, fontWeight: '600' }}>
+                          {hijyen.sıklık}
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <Switch
+                      value={!!hijyenDurumlari[hijyen.id]}
+                      onValueChange={() => toggleHijyen(hijyen)}
+                      trackColor={{ false: "#767577", true: renkler.tint }}
+                      thumbColor={"#f4f3f4"}
+                    />
                   </View>
-                  <Switch
-                    value={!!hijyenDurumlari[hijyen.id]}
-                    onValueChange={() => toggleHijyen(hijyen)}
-                    trackColor={{ false: "#767577", true: renkler.tint }}
-                    thumbColor={"#f4f3f4"}
-                  />
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
 
@@ -809,7 +883,7 @@ export default function ProfilScreen() {
                       styles.rozetKarti, 
                       { 
                         backgroundColor: rozet.kazanildi_mi ? renkler.primaryLight : (renkler.surface + '80'),
-                        borderColor: rozet.kazanildi_mi ? renkler.tint : renkler.border
+                        borderColor: rozet.kazanildi_mi ? renkler.tint + '66' : renkler.border
                       }
                     ]}
                   >
@@ -854,18 +928,22 @@ export default function ProfilScreen() {
                           borderColor: secili
                             ? renkler.tint
                             : renkler.border,
+                          borderWidth: secili ? 1.5 : 1,
                         },
                       ]}
                     >
-                      <ThemedText
-                        style={{
-                          fontSize: 13,
-                          fontWeight: "500",
-                          color: secili ? renkler.tint : renkler.text,
-                        }}
-                      >
-                        {isimMap[mode]}
-                      </ThemedText>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {secili && <Check size={14} color={renkler.tint} />}
+                        <ThemedText
+                          style={{
+                            fontSize: 13,
+                            fontWeight: "500",
+                            color: secili ? renkler.tint : renkler.text,
+                          }}
+                        >
+                          {isimMap[mode]}
+                        </ThemedText>
+                      </View>
                     </TouchableOpacity>
                   );
                 })}

@@ -1,0 +1,1 @@
+const lucide = require(" lucide-react-native\); const icons = [\Sprout\, \TrendingUp\, \Repeat\, \Sun\, \Moon\, \Bed\, \Sparkles\, \CalendarClock\, \Check\, \MoreVertical\]; const missing = icons.filter(i => !lucide[i]); console.log(\Missing:\, missing);

@@ -26,6 +26,9 @@ import { useThemeContext } from "@/hooks/ThemeProvider";
 import { API_URL } from "@/hooks/use-kullanici";
 import { GeriBildirimModal, GeriBildirimIcerik } from "@/components/GeriBildirimModal";
 import { CircularGauge } from "@/components/CircularGauge";
+import { BitkiKarakteri } from "@/components/BitkiKarakteri";
+import { Sprout } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Cilt tipine göre statik ipucu haritası
 const CILT_IPUCU: Record<string, { baslik: string; metin: string; ikon: string }> = {
@@ -69,7 +72,7 @@ const VARSAYILAN_IPUCU = {
 };
 
 function motivasyonSozuGetir(streak: number): string {
-  if (streak === 0) return "Bugün başla, ilk adımı at! 🌱";
+  if (streak === 0) return "Bugün başla, ilk adımı at!";
   if (streak < 3) return "Güzel gidiyorsun, devam et!";
   if (streak < 7) return "3 günlük rozeti kaptın, sıradaki hedef 7 gün! 🔥";
   if (streak < 30) return "Harikasın, cildin bu tutarlılığı hissediyor 💚";
@@ -99,6 +102,7 @@ export default function HomeScreen() {
   const { activeTheme: theme, toggleTheme } = useThemeContext();
   const renkler = Colors[theme];
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [kullanici, setKullanici] = useState<KullaniciBilgisi | null>(null);
   const [streak, setStreak] = useState<StreakSonucu | null>(null);
@@ -107,6 +111,7 @@ export default function HomeScreen() {
   const [healthScoreDetails, setHealthScoreDetails] = useState<any[]>([]);
   const [healthScoreUyari, setHealthScoreUyari] = useState<string | null>(null);
   const [isHealthScoreLoading, setIsHealthScoreLoading] = useState(false);
+  const [haftalikSadakat, setHaftalikSadakat] = useState<{yuzde: number, toplam_beklenen: number, toplam_tamamlanan: number, mesaj: string} | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [geriBildirimIcerikler, setGeriBildirimIcerikler] = useState<GeriBildirimIcerik[]>([]);
   const [gunEsigi, setGunEsigi] = useState<number>(3);
@@ -116,8 +121,10 @@ export default function HomeScreen() {
       const veriCek = async () => {
         try {
           const cihazId = await AsyncStorage.getItem("cihaz_id");
+          console.log("[GUARD] cihazId:", cihazId);
           if (!cihazId) return;
 
+          console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanici/cihaz/${cihazId}`);
           const yanit = await fetch(`${API_URL}/kullanici/cihaz/${cihazId}`);
           if (!yanit.ok) return;
 
@@ -127,6 +134,7 @@ export default function HomeScreen() {
           // Get Health Score
           try {
             setIsHealthScoreLoading(true);
+            console.log("[API] İstek gönderiliyor:", `${API_URL}/api/routine/health-score/${veri.kullanici_id}`);
             const hsYanit = await fetch(`${API_URL}/api/routine/health-score/${veri.kullanici_id}`);
             if (hsYanit.ok) {
               const hsVeri = await hsYanit.json();
@@ -134,10 +142,29 @@ export default function HomeScreen() {
               setLlmAciklama(hsVeri.llm_aciklama);
               setHealthScoreDetails(hsVeri.detaylar || []);
               setHealthScoreUyari(hsVeri.genel_uyari || null);
+              
+              if (hsVeri.yeni_rozetler && hsVeri.yeni_rozetler.length > 0) {
+                import('react-native').then(({ DeviceEventEmitter }) => {
+                  DeviceEventEmitter.emit('yeni_rozet_kuyrugu', hsVeri.yeni_rozetler);
+                });
+              }
             }
           } catch (e) {
+            console.error(e);
           } finally {
             setIsHealthScoreLoading(false);
+          }
+          
+          // Get Haftalik Sadakat
+          try {
+            console.log("[API] İstek gönderiliyor:", `${API_URL}/kullanicilar/${veri.kullanici_id}/haftalik-sadakat`);
+            const sadakatYanit = await fetch(`${API_URL}/kullanicilar/${veri.kullanici_id}/haftalik-sadakat`);
+            if (sadakatYanit.ok) {
+              const sadakatVeri = await sadakatYanit.json();
+              setHaftalikSadakat(sadakatVeri);
+            }
+          } catch (e) {
+            console.error(e);
           }
 
           // Frontend saatine göre tarih oluştur
@@ -147,6 +174,7 @@ export default function HomeScreen() {
           const dd = String(d.getDate()).padStart(2, '0');
           const localTarih = `${yyyy}-${mm}-${dd}`;
 
+          console.log("[API] İstek gönderiliyor:", `${API_URL}/streak/${veri.kullanici_id}?tarih=${localTarih}`);
           const streakYanit = await fetch(`${API_URL}/streak/${veri.kullanici_id}?tarih=${localTarih}`);
           if (streakYanit.ok) {
             const streakData = await streakYanit.json();
@@ -154,6 +182,7 @@ export default function HomeScreen() {
             
             // Geri Bildirim kontrolü
             if (streakData.streak_gun_sayisi >= 3) {
+               console.log("[API] İstek gönderiliyor:", `${API_URL}/geri-bildirim/gerekli-mi?kullanici_id=${veri.kullanici_id}&streak_gun_sayisi=${streakData.streak_gun_sayisi}`);
                const gbYanit = await fetch(`${API_URL}/geri-bildirim/gerekli-mi?kullanici_id=${veri.kullanici_id}&streak_gun_sayisi=${streakData.streak_gun_sayisi}`);
                if (gbYanit.ok) {
                  const gbData = await gbYanit.json();
@@ -180,7 +209,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: renkler.background }]}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <ThemedView style={styles.container}>
+        <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
           {/* ── Karşılama ── */}
           <View style={styles.baslikAlani}>
             <View>
@@ -189,7 +218,7 @@ export default function HomeScreen() {
               </ThemedText>
               {kullanici ? (
                 <ThemedText style={[styles.altBaslik, { color: renkler.tint }]}>
-                  Merhaba, {kullanici.isim} 👋
+                  Merhaba, {kullanici.isim}
                 </ThemedText>
               ) : (
                 <ThemedText style={[styles.altBaslik, { color: renkler.icon }]}>
@@ -206,21 +235,25 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* ── Streak ve Rozet Kartı ── */}
-          {streak && streak.streak_gun_sayisi > 0 && (
+          {/* ── Birleşik Rutin Serisi & Sadakat Kartı ── */}
+          {streak && streak.streak_gun_sayisi > 0 && haftalikSadakat && (
             <View
               style={[
                 styles.streakKart,
                 { backgroundColor: renkler.surface, borderColor: renkler.border },
               ]}
             >
-              <View style={styles.streakUst}>
-                <View style={styles.streakSol}>
+              <View style={[styles.streakUst, { alignItems: 'center' }]}>
+                <View style={{ marginRight: 16 }}>
+                  <Sprout size={32} color={renkler.tint} />
+                </View>
+                
+                <View style={[styles.streakSol, { flex: 1 }]}>
                   <ThemedText style={[styles.streakBaslik, { color: renkler.tint }]}>
-                    Rutin Serisi
+                    Rutin Disiplini
                   </ThemedText>
                   <ThemedText type="title" style={{ fontSize: 24, marginTop: 4 }}>
-                    🔥 {streak.streak_gun_sayisi} gün
+                    {streak.streak_gun_sayisi} gün
                   </ThemedText>
                 </View>
                 {streak.rozet && (
@@ -233,121 +266,36 @@ export default function HomeScreen() {
                 )}
               </View>
 
-              <View style={styles.progressBarBg}>
-                <View 
-                  style={[
-                    styles.progressBarFill, 
-                    { 
-                      backgroundColor: renkler.tint, 
-                      width: `${Math.min((streak.streak_gun_sayisi / streak.sonraki_esik) * 100, 100)}%` 
-                    }
-                  ]} 
-                />
-              </View>
-              <ThemedText style={[styles.progressText, { color: renkler.icon }]}>
-                Sonraki hedefe ({streak.sonraki_esik} gün) {streak.sonraki_esik - streak.streak_gun_sayisi} gün kaldı!
-              </ThemedText>
-
-              {/* ── Rozet Yol Haritası Şeridi ── */}
-              <View style={styles.rozetSeridi}>
-                {ROZETLER.map((r) => {
-                  const kazanildi = streak.streak_gun_sayisi >= r.esik;
-                  const siradaki = streak.sonraki_esik === r.esik;
-                  return (
-                    <View 
-                      key={r.esik} 
-                      style={[
-                        styles.seritRozet,
-                        { opacity: kazanildi ? 1 : 0.3 },
-                        siradaki && { borderBottomWidth: 2, borderBottomColor: renkler.tint, paddingBottom: 2 }
-                      ]}
-                    >
-                      <ThemedText style={{ fontSize: 20 }}>{r.emoji}</ThemedText>
-                      <ThemedText style={{ fontSize: 10, fontWeight: '600', marginTop: 2, color: renkler.text }}>
-                        {r.ad}
-                      </ThemedText>
-                    </View>
-                  );
-                })}
+              {/* Haftalık Sadakat Progress */}
+              <View style={{ width: '100%', marginTop: 16 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 8 }}>
+                  <ThemedText style={{ color: renkler.text, fontSize: 13, fontWeight: '600' }}>
+                    Haftalık Sadakat ({haftalikSadakat.toplam_tamamlanan}/{haftalikSadakat.toplam_beklenen})
+                  </ThemedText>
+                  <ThemedText style={{ color: renkler.tint, fontSize: 13, fontWeight: 'bold' }}>
+                    %{haftalikSadakat.yuzde}
+                  </ThemedText>
+                </View>
+                
+                <View style={{ height: 8, width: '100%', backgroundColor: renkler.border, borderRadius: 4, overflow: 'hidden' }}>
+                  <View style={{ height: '100%', width: `${haftalikSadakat.yuzde}%`, backgroundColor: renkler.tint, borderRadius: 4 }} />
+                </View>
               </View>
 
               {/* ── Motivasyon Sözü ── */}
-              <View style={[styles.motivasyonKutu, { backgroundColor: renkler.primaryLight }]}>
+              <View style={[styles.motivasyonKutu, { backgroundColor: renkler.primaryLight, marginTop: 16 }]}>
                 <ThemedText style={[styles.motivasyonYazi, { color: renkler.tint }]}>
-                  {motivasyonSozuGetir(streak.streak_gun_sayisi)}
+                  {haftalikSadakat.mesaj !== "Henüz veri yok" ? haftalikSadakat.mesaj : motivasyonSozuGetir(streak.streak_gun_sayisi)}
                 </ThemedText>
               </View>
             </View>
           )}
 
-          {/* ── Sağlık Skoru Kartı ── */}
-          {isHealthScoreLoading ? (
-            <View
-              style={[
-                styles.streakKart,
-                { backgroundColor: renkler.surface, borderColor: renkler.border, alignItems: 'center', padding: 24 },
-              ]}
-            >
-              <ThemedText type="defaultSemiBold" style={{ marginBottom: 12, fontSize: 16 }}>Rutin Sağlık Skoru</ThemedText>
-              <ThemedText style={{ color: renkler.text, opacity: 0.7 }}>Rutinin analiz ediliyor...</ThemedText>
-            </View>
-          ) : healthScore !== null && (
-            <View
-              style={[
-                styles.streakKart,
-                { backgroundColor: renkler.surface, borderColor: renkler.border, alignItems: 'center' },
-              ]}
-            >
-              <ThemedText type="defaultSemiBold" style={{ marginBottom: 16, fontSize: 16 }}>Rutin Sağlık Skoru</ThemedText>
-              <CircularGauge score={healthScore} size={150} />
-              
-              {llmAciklama && (
-                <View style={{ marginTop: 24, backgroundColor: renkler.scoreGreen + '20', padding: 16, borderRadius: 12, width: '100%' }}>
-                  <ThemedText style={{ color: renkler.text, fontSize: 14, lineHeight: 20 }}>
-                    {llmAciklama}
-                  </ThemedText>
-                </View>
-              )}
 
-              {healthScoreDetails.length > 0 && (
-                <View style={{ marginTop: 16, width: '100%' }}>
-                  {healthScoreDetails.map((detay, idx) => {
-                    let badgeColor = '#9CA3AF'; // dogrulanmadi - gray
-                    let badgeText = 'AI Kaynaklı';
-                    
-                    if (detay.dogrulama_durumu === 'dogrulandi') {
-                      badgeColor = '#10B981'; // dogrulandi - mint/green
-                      badgeText = 'Doğrulanmış Kaynak';
-                    } else if (detay.dogrulama_durumu === 'kismi') {
-                      badgeColor = '#F59E0B'; // kismi - amber/yellow
-                      badgeText = 'Kısmen Doğrulanmış';
-                    }
 
-                    return (
-                      <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: renkler.border }}>
-                        <ThemedText style={{ fontSize: 13, color: renkler.text, flex: 1, marginRight: 8 }}>
-                          {detay.icerik_1} + {detay.icerik_2}
-                        </ThemedText>
-                        <View style={{ backgroundColor: badgeColor + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: badgeColor }}>
-                          <ThemedText style={{ fontSize: 10, color: badgeColor, fontWeight: '600' }}>
-                            {badgeText}
-                          </ThemedText>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
 
-              {healthScoreUyari && (
-                <ThemedText style={{ marginTop: 24, fontSize: 11, color: renkler.icon, textAlign: 'center', fontStyle: 'italic' }}>
-                  {healthScoreUyari}
-                </ThemedText>
-              )}
-            </View>
-          )}
 
-          {/* ── İpucu Kartı ── */}
+          {/* 💡 İpucu Kartı 💡 */}
           <View
             style={[
               styles.ipucuKart,
@@ -473,7 +421,7 @@ const styles = StyleSheet.create({
 
   ipucuKart: {
     borderRadius: 16,
-    borderWidth: 1,
+    borderWidth: 0,
     padding: 16,
     flexDirection: "row",
     gap: 14,
@@ -492,7 +440,7 @@ const styles = StyleSheet.create({
   ipucuMetin: { fontSize: 14, lineHeight: 20 },
 
   streakKart: {
-    padding: 16,
+    padding: 24,
     borderRadius: 16,
     borderWidth: 1,
     marginBottom: 16,

@@ -1,5 +1,6 @@
 import React from 'react';
-import { TouchableOpacity, Alert, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { CustomAlert as Alert } from '@/components/OzelAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeContext } from '@/hooks/ThemeProvider';
 import { Colors } from '@/constants/theme';

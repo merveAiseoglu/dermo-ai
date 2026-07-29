@@ -7,11 +7,12 @@ import {
   ActivityIndicator,
   FlatList,
   TextInput,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  DeviceEventEmitter,
 } from 'react-native';
+import { CustomAlert as Alert } from '@/components/OzelAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
@@ -33,6 +34,7 @@ interface IcerikSonuc {
   icerik_adi: string;
   baz_tipi: string;
   renk?: string;
+  kullanim_talimati?: string | null;
 }
 
 export function ManuelRutinEkleModal({
@@ -61,6 +63,9 @@ export function ManuelRutinEkleModal({
   const [dikkatliKullanNotlari, setDikkatliKullanNotlari] = useState<{icerik_adi: string, kosul_notu: string}[]>([]);
   
   const [islemYukleniyor, setIslemYukleniyor] = useState(false);
+  
+  const [aktifSekme, setAktifSekme] = useState<'kutuphane' | 'serbest'>('kutuphane');
+  const [serbestUrunAdi, setSerbestUrunAdi] = useState('');
 
   // Debounce ile arama
   useEffect(() => {
@@ -80,12 +85,10 @@ export function ManuelRutinEkleModal({
         .then((data) => {
           if (data.sonuclar) {
             setSonuclar(data.sonuclar);
-            if (data.yeni_rozet_kazanildi) {
-               // Event emitter ile globale bildireceğiz
-               // Şimdilik sadece consola basabiliriz veya DeviceEventEmitter kullanabiliriz
-               import('react-native').then(({ DeviceEventEmitter }) => {
-                 DeviceEventEmitter.emit('yeni_rozet', data.yeni_rozet_kazanildi);
-               });
+            if (data.yeni_rozetler && data.yeni_rozetler.length > 0) {
+              DeviceEventEmitter.emit('yeni_rozet_kuyrugu', data.yeni_rozetler);
+            } else if (data.yeni_rozet_kazanildi) {
+              DeviceEventEmitter.emit('yeni_rozet_kuyrugu', [data.yeni_rozet_kazanildi]);
             }
           } else {
             setSonuclar(data);
@@ -111,6 +114,8 @@ export function ManuelRutinEkleModal({
     setFiltreCiltTipi(false);
     setFiltreKomedojenite(false);
     setDikkatliKullanNotlari([]);
+    setAktifSekme('kutuphane');
+    setSerbestUrunAdi('');
   };
 
   const handleClose = () => {
@@ -145,60 +150,80 @@ export function ManuelRutinEkleModal({
 
     setIslemYukleniyor(true);
     try {
-      const response = await fetch(`${API_URL}/rutinler/manuel-ekle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kullanici_id: kullaniciId,
-          icerik_id: seciliIcerik.icerik_id,
-          gunler: gunlerDizisi,
-          zaman_dilimi: zamanDilimi,
-          onay: onay
-        })
-      });
-
-      if (!response.ok) throw new Error('Sunucu hatası');
-      const data = await response.json();
-
-      if (data.uyari) {
-        setIslemYukleniyor(false);
-        let mesaj = '';
-        if (data.cakismalar && data.cakismalar.length > 0) {
-          mesaj += `Bu içerik rutininizdeki ${data.cakismalar[0].icerik_adi} ile çakışabilir:\n${data.cakismalar[0].aciklama}\n\n`;
-        }
-        if (data.komedojenite_uyarisi) {
-          mesaj += `Bu içerik yüksek komedojenite (gözenek tıkama) riskine sahip.\n\n`;
-        }
-        
-        Alert.alert(
-          'Uyarı',
-          mesaj + 'Yine de eklemek istiyor musunuz?',
-          [
-            { text: 'İptal', style: 'cancel' },
-            { text: 'Yine de Ekle', style: 'destructive', onPress: () => rutineEkle(true) }
-          ]
-        );
-        return;
-      }
-
-      // Başarılı, bildirimleri kur
-      await bildirimKur(data.rutin_id, seciliIcerik.icerik_adi, gunlerDizisi, zamanDilimi);
-      
-      onEklendi(); // Refresh parent component
-
-      if (data.yeni_rozet_kazanildi) {
-        import('react-native').then(({ DeviceEventEmitter }) => {
-          DeviceEventEmitter.emit('yeni_rozet', data.yeni_rozet_kazanildi);
+      if (seciliIcerik.icerik_id === -1) {
+        // Serbest ürün ekleme akışı
+        const response = await fetch(`${API_URL}/rutinler/serbest-ekle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kullanici_id: kullaniciId,
+            serbest_urun_adi: seciliIcerik.icerik_adi,
+            gunler: gunlerDizisi,
+            zaman_dilimi: zamanDilimi
+          })
         });
-      }
 
-      if (data.dikkatli_kullan_notlari && data.dikkatli_kullan_notlari.length > 0) {
-        setDikkatliKullanNotlari(data.dikkatli_kullan_notlari);
-      } else {
-        Alert.alert('Başarılı', `${seciliIcerik.icerik_adi} rutininize eklendi!`);
+        if (!response.ok) throw new Error('Sunucu hatası');
+        await bildirimKur(-1, seciliIcerik.icerik_adi, gunlerDizisi, zamanDilimi);
+        Alert.alert('Başarılı', `"${seciliIcerik.icerik_adi}" rutininize eklendi!`);
+        onEklendi();
         handleClose();
-      }
+      } else {
+        // Mevcut kütüphane ürünü ekleme akışı
+        const response = await fetch(`${API_URL}/rutinler/manuel-ekle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kullanici_id: kullaniciId,
+            icerik_id: seciliIcerik.icerik_id,
+            gunler: gunlerDizisi,
+            zaman_dilimi: zamanDilimi,
+            onay: onay
+          })
+        });
 
+        if (!response.ok) throw new Error('Sunucu hatası');
+        const data = await response.json();
+
+        if (data.uyari && !onay) {
+          setIslemYukleniyor(false);
+          let mesaj = '';
+          if (data.cakismalar && data.cakismalar.length > 0) {
+            mesaj += `Bu içerik rutininizdeki ${data.cakismalar[0].icerik_adi} ile çakışabilir:\n${data.cakismalar[0].aciklama}\n\n`;
+          }
+          if (data.komedojenite_uyarisi) {
+            mesaj += `Bu içerik yüksek komedojenite (gözenek tıkama) riskine sahip.\n\n`;
+          }
+          
+          Alert.alert(
+            'Uyarı',
+            mesaj + 'Yine de eklemek istiyor musunuz?',
+            [
+              { text: 'İptal', style: 'cancel' },
+              { text: 'Yine de Ekle', style: 'destructive', onPress: () => rutineEkle(true) }
+            ]
+          );
+          return;
+        }
+
+        // Başarılı, bildirimleri kur
+        await bildirimKur(data.rutin_id, seciliIcerik.icerik_adi, gunlerDizisi, zamanDilimi);
+        
+        onEklendi(); 
+
+        if (data.yeni_rozetler && data.yeni_rozetler.length > 0) {
+          DeviceEventEmitter.emit('yeni_rozet_kuyrugu', data.yeni_rozetler);
+        } else if (data.yeni_rozet_kazanildi) {
+          DeviceEventEmitter.emit('yeni_rozet_kuyrugu', [data.yeni_rozet_kazanildi]);
+        }
+
+        if (data.dikkatli_kullan_notlari && data.dikkatli_kullan_notlari.length > 0) {
+          setDikkatliKullanNotlari(data.dikkatli_kullan_notlari);
+        } else {
+          Alert.alert('Başarılı', `${seciliIcerik.icerik_adi} rutininize eklendi!`);
+          handleClose();
+        }
+      }
     } catch (e) {
       console.error(e);
       Alert.alert('Hata', 'Rutin eklenirken bir hata oluştu.');
@@ -218,6 +243,11 @@ export function ManuelRutinEkleModal({
           <RenkRozeti renk={item.renk} />
         </View>
         <ThemedText style={{ fontSize: 13, color: renkler.icon }}>{item.baz_tipi}</ThemedText>
+        {item.kullanim_talimati && (
+          <ThemedText style={{ fontSize: 12, color: renkler.icon, fontStyle: 'italic', marginTop: 2 }} numberOfLines={2}>
+            {item.kullanim_talimati}
+          </ThemedText>
+        )}
       </View>
       <Ionicons name="add-circle-outline" size={24} color={renkler.tint} />
     </TouchableOpacity>
@@ -238,7 +268,25 @@ export function ManuelRutinEkleModal({
 
         {!seciliIcerik ? (
           <View style={{ flex: 1, padding: 20 }}>
-            <View style={[styles.aramaKutusu, { backgroundColor: renkler.surface, borderColor: renkler.border }]}>
+            {/* Sekmeler */}
+            <View style={{ flexDirection: 'row', marginBottom: 16, backgroundColor: renkler.surface, borderRadius: 8, padding: 4 }}>
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: aktifSekme === 'kutuphane' ? renkler.tint : 'transparent', borderRadius: 6 }}
+                onPress={() => setAktifSekme('kutuphane')}
+              >
+                <ThemedText style={{ color: aktifSekme === 'kutuphane' ? '#FFF' : renkler.text, fontWeight: '600', fontSize: 14 }}>Kütüphaneden Seç</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: aktifSekme === 'serbest' ? renkler.tint : 'transparent', borderRadius: 6 }}
+                onPress={() => setAktifSekme('serbest')}
+              >
+                <ThemedText style={{ color: aktifSekme === 'serbest' ? '#FFF' : renkler.text, fontWeight: '600', fontSize: 14 }}>Kendi Ürününü Ekle</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            {aktifSekme === 'kutuphane' ? (
+              <>
+                <View style={[styles.aramaKutusu, { backgroundColor: renkler.surface, borderColor: renkler.border }]}>
               <Ionicons name="search" size={20} color={renkler.icon} />
               <TextInput
                 style={[styles.aramaInput, { color: renkler.text }]}
@@ -293,6 +341,38 @@ export function ManuelRutinEkleModal({
                   </View>
                 }
               />
+            )}
+              </>
+            ) : (
+              <View style={{ flex: 1 }}>
+                <View style={{ backgroundColor: '#E8F4FD', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                  <ThemedText style={{ color: '#005A9E', fontSize: 13 }}>ℹ️ Bu ürün analiz kapsamı dışında, sadece hatırlatıcı olarak eklenir.</ThemedText>
+                </View>
+                <ThemedText style={{ color: renkler.text, marginBottom: 8, fontWeight: '600' }}>Ürün Adı</ThemedText>
+                <TextInput
+                  style={[styles.aramaInput, { color: renkler.text, backgroundColor: renkler.surface, borderColor: renkler.border, borderWidth: 1, padding: 12, borderRadius: 8, marginBottom: 20 }]}
+                  placeholder="Ürün adını girin (örn: Haftalık Kil Maskesi)"
+                  placeholderTextColor={renkler.icon}
+                  value={serbestUrunAdi}
+                  onChangeText={setSerbestUrunAdi}
+                  autoFocus
+                />
+                
+                {/* Gün ve Zaman seçiciler burada render edilebilir, ancak aşağıda seciliIcerik durumunda render edildiği için ortak bir Component olarak refactor etmek veya buraya eklemek gerek. Mevcut koda dokunmamak adına seçimi buradan da yapabilir ve serbestEkle'yi çağırabiliriz. */}
+                <TouchableOpacity
+                  style={[styles.onayButon, { backgroundColor: serbestUrunAdi.trim() ? renkler.tint : renkler.border, marginTop: 'auto' }]}
+                  onPress={() => {
+                    setSeciliIcerik({
+                      icerik_id: -1,
+                      icerik_adi: serbestUrunAdi.trim(),
+                      baz_tipi: 'Kapsam Dışı',
+                    });
+                  }}
+                  disabled={!serbestUrunAdi.trim()}
+                >
+                  <ThemedText style={styles.onayButonYazi}>Devam Et</ThemedText>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         ) : (
@@ -474,6 +554,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
+  },
+  onayButonYazi: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
   },
   filtreChip: {
     paddingHorizontal: 12,

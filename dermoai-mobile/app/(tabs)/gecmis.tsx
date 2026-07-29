@@ -7,7 +7,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +16,8 @@ import {
   SafeAreaView,
   StyleSheet,
   View,
+  Image,
+  TouchableOpacity,
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
@@ -38,21 +40,39 @@ interface GecmisKaydi {
   olusturma_tarihi: string | null;
 }
 
-function tarihBicimle(iso: string | null): string {
+function getRelativeDateLabel(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleDateString("tr-TR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const bugun = new Date();
+  
+  // Sadece tarih kısımlarını karşılaştırmak için saatleri sıfırlayalım
+  const dTarih = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const bugunTarih = new Date(bugun.getFullYear(), bugun.getMonth(), bugun.getDate());
+  
+  const farkMs = bugunTarih.getTime() - dTarih.getTime();
+  const farkGun = farkMs / (1000 * 60 * 60 * 24);
+  
+  const saat = d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+  
+  if (farkGun === 0) {
+    return `Bugün, ${saat}`;
+  } else if (farkGun === 1) {
+    return `Dün, ${saat}`;
+  } else {
+    return d.toLocaleDateString("tr-TR", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
 }
 
 export default function GecmisScreen() {
   const theme = useColorScheme() ?? "light";
   const renkler = Colors[theme];
+  const router = useRouter();
 
   const [kayitlar, setKayitlar] = useState<GecmisKaydi[]>([]);
   const [yukleniyor, setYukleniyor] = useState(true);
@@ -66,11 +86,13 @@ export default function GecmisScreen() {
 
     try {
       const kullaniciIdStr = await AsyncStorage.getItem("kullanici_id");
+      console.log("[GUARD] kullaniciIdStr:", kullaniciIdStr);
       if (!kullaniciIdStr) {
         setHata("Kullanıcı bilgisi bulunamadı.");
         return;
       }
 
+      console.log("[API] İstek gönderiliyor:", `${API_URL}/gecmis/${kullaniciIdStr}`);
       const yanit = await fetch(`${API_URL}/gecmis/${kullaniciIdStr}`);
       if (!yanit.ok) throw new Error("Sunucu hatası");
 
@@ -100,15 +122,18 @@ export default function GecmisScreen() {
           styles.kart,
           {
             backgroundColor: renkler.surface,
-            borderColor: guvenlimi ? renkler.success : renkler.danger,
+            borderColor: theme === 'dark' ? '#333' : 'rgba(0,0,0,0.08)',
             borderLeftWidth: 4,
+            borderLeftColor: guvenlimi ? renkler.success : renkler.danger,
+            overflow: "hidden",
+            gap: 12,
           },
         ]}
       >
         {/* Üst satır: tarih + rozet */}
         <View style={styles.kartUst}>
           <ThemedText style={[styles.tarih, { color: renkler.icon }]}>
-            {tarihBicimle(item.olusturma_tarihi)}
+            {getRelativeDateLabel(item.olusturma_tarihi)}
           </ThemedText>
           <View
             style={[
@@ -140,12 +165,22 @@ export default function GecmisScreen() {
 
         {/* Ürün listesi */}
         <View style={styles.urunListesi}>
-          {item.urunler.map((urun, i) => (
-            <View key={i} style={styles.urunSatiri}>
-              <UrunGorseli gorselUrl={urun.gorsel_url} marka={urun.marka} boyut={24} />
-              <ThemedText style={styles.urunAdi}>{urun.marka} - {urun.urun_adi}</ThemedText>
-            </View>
-          ))}
+          {item.urunler.map((urun, i) => {
+            const brandName = urun.marka || "";
+            const productName = urun.urun_adi || "";
+            const displayName = productName.toLowerCase().startsWith(brandName.toLowerCase()) 
+              ? productName 
+              : `${brandName} - ${productName}`;
+            
+            return (
+              <View key={i} style={styles.urunSatiri}>
+                <UrunGorseli gorselUrl={urun.gorsel_url} marka={brandName} boyut={24} />
+                <ThemedText style={styles.urunAdi} numberOfLines={1} ellipsizeMode="tail">
+                  {displayName}
+                </ThemedText>
+              </View>
+            );
+          })}
         </View>
       </View>
     );
@@ -181,13 +216,22 @@ export default function GecmisScreen() {
 
         {!yukleniyor && !hata && kayitlar.length === 0 && (
           <View style={styles.merkezKutu}>
-            <Ionicons name="time-outline" size={48} color={renkler.icon} />
-            <ThemedText style={[styles.bilgiYazi, { color: renkler.icon }]}>
-              Henüz analiz yapılmadı.
+            <Image 
+              source={require('@/assets/images/karakterler/peri-maskot.png')} 
+              style={{ width: 80, height: 80, marginBottom: 8 }} 
+              resizeMode="contain" 
+            />
+            <ThemedText style={[styles.bilgiAlt, { color: renkler.icon, marginBottom: 16 }]}>
+              Henüz analiz yapmadın. İlk ürününü ekleyip başla!
             </ThemedText>
-            <ThemedText style={[styles.bilgiAlt, { color: renkler.icon }]}>
-              Ana sayfadan ürünlerini seç ve analiz et!
-            </ThemedText>
+            <TouchableOpacity 
+              onPress={() => router.push("/analiz")} 
+              style={{ backgroundColor: renkler.tint, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24 }}
+            >
+              <ThemedText style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+                Analiz Yap
+              </ThemedText>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -250,7 +294,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   rozetYazi: { fontSize: 12, fontWeight: "600" },
-  urunListesi: { gap: 6 },
+  urunListesi: { gap: 12 },
   urunSatiri: { flexDirection: "row", alignItems: "center", gap: 8 },
   nokta: { width: 6, height: 6, borderRadius: 3 },
   urunAdi: { fontSize: 14, flex: 1 },
